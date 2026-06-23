@@ -18,9 +18,14 @@
   "bin": {
     "blast-radius": "cli/bin/cli.js"
   },
-  "main": "./engine/classify.ts",
+  "main": "./dist/engine/classify.mjs",
+  "exports": {
+    ".": "./dist/engine/classify.mjs",
+    "./owners": "./dist/engine/ownersConfig.mjs"
+  },
   "files": [
     "engine/",
+    "dist/",
     "cli/",
     "templates/",
     "skill/",
@@ -29,7 +34,9 @@
   ],
   "scripts": {
     "test": "vitest run engine",
+    "build": "node scripts/build-engine.mjs",
     "build:skills": "node scripts/build-skills.mjs",
+    "prepack": "node scripts/build-engine.mjs",
     "init": "node cli/bin/cli.js init",
     "doctor": "node cli/bin/cli.js doctor"
   },
@@ -38,6 +45,7 @@
     "yaml": "2.5.1"
   },
   "devDependencies": {
+    "esbuild": "0.24.0",
     "tsx": "4.19.2",
     "vitest": "2.1.8"
   }

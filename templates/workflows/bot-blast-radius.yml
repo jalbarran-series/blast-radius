@@ -74,10 +74,6 @@ jobs:
             echo "Base has no .github/blast-radius yet (bootstrap); using PR-head copy"
           fi
 
-      - name: Install classifier deps
-        working-directory: .github/blast-radius
-        run: npm ci
-
       - name: Guard — no orphan owners (owners ⊆ config tier 3)
         env:
           BASE: ${{ steps.pr.outputs.base }}
@@ -93,7 +89,7 @@ jobs:
             || git show "origin/$BASE:.github/blast-radius/owners" > /tmp/owners.head
           git show "HEAD:.github/blast-radius/config.yml" > /tmp/config.head.yml 2>/dev/null \
             || git show "origin/$BASE:.github/blast-radius/config.yml" > /tmp/config.head.yml
-          npx --prefix .github/blast-radius tsx .github/blast-radius/checkOwnersConfig.ts \
+          node .github/blast-radius/checkOwnersConfig.mjs \
             --owners /tmp/owners.head --cfg /tmp/config.head.yml
 
       - name: Classify
@@ -112,7 +108,7 @@ jobs:
             ([.labels[].name | select(startswith("flag:")) | sub("flag:";"")]
              + [ (.body // "") | capture("(?im)^Flag:\\s*(?<n>[A-Z0-9_]+)").n ])
             | map(select(. != null and . != "")) | .[0] // ""' 2>/dev/null || echo "")
-          npx --prefix .github/blast-radius tsx .github/blast-radius/runClassify.ts \
+          node .github/blast-radius/runClassify.mjs \
             --files /tmp/files.txt --diff /tmp/diff.txt --flag "$FLAG" \            --base "origin/$BASE" > /tmp/result.json
           echo "Result:" && cat /tmp/result.json
 

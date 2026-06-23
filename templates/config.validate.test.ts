@@ -6,8 +6,8 @@
 // Add your own assertions below — e.g. "our auth path must classify Tier 3".
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { classify } from './classify';
-import { orphanOwners } from './ownersConfig';
+import { classify } from './classify.mjs';
+import { orphanOwners } from './ownersConfig.mjs';
 
 const cfgPath = `${__dirname}/config.yml`;
 

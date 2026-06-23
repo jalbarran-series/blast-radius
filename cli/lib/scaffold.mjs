@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,18 +6,14 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const FRAMEWORK_ROOT = join(HERE, '..', '..');
 
-// Engine source files consumers need at runtime (no tests, no fixtures, no the
-// framework-only cli-classify shim).
+// Compiled standalone bundles consumers run with zero install (deps inlined).
+// The framework-only cli-classify.mjs is not shipped to consumers.
 const ENGINE_RUNTIME = [
-  'classify.ts',
-  'codeowners.ts',
-  'contentEscalation.ts',
-  'flagContainment.ts',
-  'workflowInert.ts',
-  'ownersConfig.ts',
-  'checkOwnersConfig.ts',
-  'runClassify.ts',
-  'runAssign.ts',
+  'classify.mjs',
+  'ownersConfig.mjs',
+  'checkOwnersConfig.mjs',
+  'runClassify.mjs',
+  'runAssign.mjs',
 ];
 
 const log = (s) => console.log(s);
@@ -34,11 +31,17 @@ function copyFile(src, dest, { overwrite }) {
 export function scaffold(targetDir) {
   const br = join(targetDir, '.github', 'blast-radius');
   const tpl = join(FRAMEWORK_ROOT, 'templates');
-  const eng = join(FRAMEWORK_ROOT, 'engine');
+  const eng = join(FRAMEWORK_ROOT, 'dist', 'engine');
+
+  // The compiled bundles must exist — build on demand if missing.
+  if (!existsSync(join(eng, 'classify.mjs'))) {
+    log('Building engine bundles (dist/engine missing)…');
+    execFileSync('node', [join(FRAMEWORK_ROOT, 'scripts', 'build-engine.mjs')], { stdio: 'inherit' });
+  }
 
   log(`Scaffolding blast-radius into ${targetDir}`);
 
-  // 1. Engine runtime — framework-owned, always overwrite (keeps repos in sync).
+  // 1. Engine runtime (compiled .mjs) — framework-owned, always overwrite.
   for (const f of ENGINE_RUNTIME) copyFile(join(eng, f), join(br, f), { overwrite: true });
 
   // 2. Per-repo surface — never clobber once a repo owns it.

@@ -1,19 +1,14 @@
 {
-  "name": "blast-radius",
+  "name": "blast-radius-config",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "classify": "tsx runClassify.ts",
-    "assign": "tsx runAssign.ts",
-    "check-owners": "tsx checkOwnersConfig.ts"
-  },
-  "dependencies": {
-    "minimatch": "9.0.5",
-    "yaml": "2.5.1"
+    "classify": "node runClassify.mjs",
+    "assign": "node runAssign.mjs",
+    "check-owners": "node checkOwnersConfig.mjs"
   },
   "devDependencies": {
-    "tsx": "4.19.2",
     "vitest": "2.1.8"
   }
 }

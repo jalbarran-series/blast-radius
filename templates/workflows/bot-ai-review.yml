@@ -94,10 +94,6 @@ jobs:
             echo "Base has no .github/prompts yet (bootstrap); using PR-head copy"
           fi
 
-      - name: Install classifier deps
-        working-directory: .github/blast-radius
-        run: npm ci
-
       - name: Compute blast tier (Tier 0 skips Opus)
         id: tier
         env:
@@ -117,7 +113,7 @@ jobs:
             ([.labels[].name | select(startswith("flag:")) | sub("flag:";"")]
              + [ (.body // "") | capture("(?im)^Flag:\\s*(?<n>[A-Z0-9_]+)").n ])
             | map(select(. != null and . != "")) | .[0] // ""' 2>/dev/null || echo "")
-          T=$(npx --prefix .github/blast-radius tsx .github/blast-radius/runClassify.ts \
+          T=$(node .github/blast-radius/runClassify.mjs \
             --files /tmp/files.txt --diff /tmp/diff.txt --flag "$FLAG" \
             --base "origin/$BASE" | jq -r .tier)
           echo "tier=$T" >> "$GITHUB_OUTPUT"

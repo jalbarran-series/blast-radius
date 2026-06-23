@@ -26,7 +26,7 @@ cd .github/blast-radius && npm install && npm test   # validate config + owners
 
 | Path | Owner | Clobbered on re-init? |
 |---|---|---|
-| `.github/blast-radius/*.ts` | framework (engine) | yes — keeps repos in sync |
+| `.github/blast-radius/*.mjs` | framework (compiled engine, zero-dep) | yes — keeps repos in sync |
 | `.github/blast-radius/config.yml` | **your repo** | no |
 | `.github/blast-radius/owners` | **your repo** | no |
 | `.github/blast-radius/config.validate.test.ts` | **your repo** | no |
@@ -55,12 +55,16 @@ blast-radius classify <file>...  # print the tier for a set of changed files
 ## Layout
 
 ```
-engine/      deterministic classifier (repo-agnostic) + fixture tests
+engine/      deterministic classifier (repo-agnostic, TS source) + fixture tests
+dist/engine/ compiled standalone .mjs bundles (deps inlined; built, gitignored)
 templates/   per-repo starter config.yml, owners, PR template, bot workflows
 cli/         the `blast-radius` CLI (init / doctor / classify)
 skill/       single-source agent skill (SKILL.src.md → built per provider)
-scripts/     build-skills.mjs (sync skill into .claude/.cursor/.agents/dist)
+scripts/     build-engine.mjs (TS → .mjs) + build-skills.mjs (skill sync)
 ```
 
-Engine is shipped and versioned; config is scaffolded and repo-owned. See
+Engine is shipped and versioned; config is scaffolded and repo-owned. `init`
+scaffolds the **compiled `.mjs`** engine, so a consumer's CI runs `node
+runClassify.mjs` with zero install (only the repo-owned validation test needs
+vitest). Run `npm run build` after changing `engine/**`. See
 `skill/reference/architecture.md`.
