@@ -1,0 +1,17 @@
+# NOTE: package.json `files` is the authoritative allowlist and OVERRIDES this
+# file — the real test/fixture exclusion lives there as `!engine/**/*.test.ts`
+# and `!engine/__fixtures__/`. This .npmignore is a fallback for if `files` is
+# ever removed. Keep the two in sync. (templates/config.validate.test.ts is
+# intentionally shipped — consumers run it — so do NOT blanket-ignore *.test.ts.)
+
+# Engine test suite + fixtures — not needed by consumers.
+engine/**/*.test.ts
+engine/__fixtures__/
+
+# Build/dev sources outside the runtime package.
+scripts/
+vitest.config.*
+tsconfig*.json
+
+# Agent planning artifacts (also gitignored).
+.plans/

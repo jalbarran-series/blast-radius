@@ -25,6 +25,8 @@
   },
   "files": [
     "engine/",
+    "!engine/**/*.test.ts",
+    "!engine/__fixtures__/",
     "dist/",
     "cli/",
     "templates/",
