@@ -18,7 +18,7 @@ deterministic classifier measures blast radius on every push.
 ## Install into a repo
 
 ```bash
-npx @drekki/blast-radius init            # scaffold into the current repo
+npx blast-radius init                    # scaffold into the current repo
 cd .github/blast-radius && npm install && npm test   # validate config + owners
 ```
 

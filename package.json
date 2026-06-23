@@ -1,5 +1,5 @@
 {
-  "name": "@drekki/blast-radius",
+  "name": "blast-radius",
   "version": "0.1.0",
   "description": "Blast-radius tiered PR merge policy for AI-authored code — a deterministic classifier, bot workflows, and an agent skill, installable into any repo.",
   "keywords": [
