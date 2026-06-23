@@ -110,9 +110,9 @@ jobs:
         uses: actions/github-script@v7
         env:
           # Comma-separated base branches eligible for native auto-merge.
-          # Defaults to `develop` when unset. Point it at a throwaway branch
+          # Defaults to `main` when unset. Point it at a throwaway branch
           # (e.g. test/automerge-staging) to exercise the real auto-merge flow
-          # off-develop before rollout; add `develop` to go live.
+          # off your default branch before rollout; add `main` to go live.
           AUTOMERGE_BASES: ${{ vars.AUTOMERGE_BASES }}
           # PR number when this gate is dispatched directly by the backfill.
           PR_INPUT: ${{ inputs.pr }}
