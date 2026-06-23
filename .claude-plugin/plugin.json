@@ -3,8 +3,8 @@
   "description": "Tiered PR merge policy for AI-authored code: a deterministic blast-radius classifier, bot workflows, and an agent skill, installable into any repo.",
   "version": "0.1.1",
   "author": {
-    "name": "drekki"
+    "name": "jalbarran-series"
   },
-  "repository": "https://github.com/drekki/blast-radius",
+  "repository": "https://github.com/jalbarran-series/blast-radius",
   "skills": "./.claude/skills/"
 }

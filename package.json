@@ -15,6 +15,12 @@
   ],
   "license": "Apache-2.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jalbarran-series/blast-radius.git"
+  },
+  "homepage": "https://github.com/jalbarran-series/blast-radius#readme",
+  "bugs": "https://github.com/jalbarran-series/blast-radius/issues",
   "bin": {
     "blast-radius": "cli/bin/cli.js"
   },
