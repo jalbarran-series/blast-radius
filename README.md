@@ -57,6 +57,7 @@ Then: edit `config.yml` tiers + `owners` for your paths, set the
 ```bash
 npx @series-inc/blast-radius install [dir]       # scaffold engine + workflows + starter config + skill
 npx @series-inc/blast-radius update  [dir]       # pull latest framework files; surface workflow drift
+npx @series-inc/blast-radius uninstall [dir]     # remove blast-radius from a repo (dry-run unless --yes)
 npx @series-inc/blast-radius doctor  [dir]       # validate config.yml + owners (no orphan owners)
 npx @series-inc/blast-radius classify <file>...  # print the tier for a set of changed files
 ```
@@ -66,6 +67,12 @@ npx @series-inc/blast-radius classify <file>...  # print the tier for a set of c
 non-destructive `<file>.new` next to any file that drifted from the current
 template — diff, merge what you want, then delete the `.new`. It never touches
 your `config.yml`, `owners`, or `config.validate.test.ts`.
+
+`uninstall` is **dry-run by default** — it lists what it would delete
+(`.github/blast-radius/`, the shipped `bot-*.yml` workflows, and the agent skill
+dirs) and removes nothing until you pass `--yes`. It leaves
+`.github/PULL_REQUEST_TEMPLATE.md` (reported) since that file may predate or
+outlive blast-radius.
 
 Agent commands (from the installed skill): `/blast-radius init`, `/blast-radius explain`.
 

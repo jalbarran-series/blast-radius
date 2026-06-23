@@ -17,6 +17,7 @@ version in `package.json`).
 | Build skill into agent dirs | `npm run build:skills` |
 | Scaffold into a repo | `node cli/bin/cli.js install <dir>` |
 | Update an installed repo | `node cli/bin/cli.js update <dir>` |
+| Uninstall from a repo | `node cli/bin/cli.js uninstall <dir> --yes` |
 | Validate a repo's config | `node cli/bin/cli.js doctor <dir>` |
 | Classify files | `node cli/bin/cli.js classify <file>...` |
 
@@ -62,6 +63,7 @@ engine/runAssign.ts    auto-assign dry-run; AUTHOR_OVERRIDES/FALLBACK_POOL empty
 templates/             scaffolded into consumers' .github/ and agent dirs
 cli/lib/scaffold.mjs   install copy logic + framework-owned writers
 cli/lib/update.mjs     update: refresh framework files, write <file>.new on drift
+cli/lib/uninstall.mjs  uninstall: remove scaffolded paths (dry-run unless --yes)
 skill/SKILL.src.md     the one true skill source
 ```
 

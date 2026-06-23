@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { FRAMEWORK_ROOT, scaffold } from '../lib/scaffold.mjs';
 import { update } from '../lib/update.mjs';
+import { uninstall } from '../lib/uninstall.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -23,6 +24,7 @@ function help() {
 Usage:
   blast-radius install [targetDir]      Scaffold engine + workflows + starter config + skill
   blast-radius update  [targetDir]      Refresh framework files; surface workflow drift as .new
+  blast-radius uninstall [targetDir]    Remove blast-radius from a repo (dry-run unless --yes)
   blast-radius doctor  [targetDir]      Validate this repo's config.yml + owners
   blast-radius classify <file>...       Print the tier for a set of changed files
   blast-radius help
@@ -33,6 +35,9 @@ Notes:
   - install never clobbers config.yml / owners / workflows once a repo owns them.
   - update overwrites framework files (engine + skill) and writes <file>.new for
     workflows/PR template that drifted from the templates (never clobbers them).
+  - uninstall is dry-run by default (lists targets); pass --yes to delete. It
+    removes .github/blast-radius/, the shipped bot workflows, and the agent
+    skill dirs; it leaves PULL_REQUEST_TEMPLATE.md (reported).
   - doctor + classify use the config at <repo>/.github/blast-radius/config.yml
     (override with --config <path>).`);
 }
@@ -47,6 +52,12 @@ switch (cmd) {
   case 'update': {
     const target = resolve(rest[0] || '.');
     update(target);
+    break;
+  }
+
+  case 'uninstall': {
+    const target = resolve(rest.find((a) => !a.startsWith('--')) || '.');
+    uninstall(target, { apply: rest.includes('--yes') });
     break;
   }
 
