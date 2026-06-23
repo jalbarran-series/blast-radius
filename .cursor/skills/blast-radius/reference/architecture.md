@@ -7,7 +7,7 @@ A deterministic classifier + a thin bot layer. The split that matters: the
 
 ```
 push → bot-blast-radius   → classify.ts (base-ref) → tier 0–3 + sticky comment + SHA-pinned status
-     → bot-ai-review      → Opus review (Tier ≥ 1)  → ai-review-gate (red while blockers remain)
+     → bot-ai-review      → AI review (Tier ≥ 1)    → ai-review-gate (red while blockers remain)
      → bot-auto-assign-pr → routes assignee         → Tier 3: path owner; Tier 1/2 high-risk: pool
      → bot-merge-policy   → tier + risk + approvals + po-verified + assignee → merge-policy-gate
 ```

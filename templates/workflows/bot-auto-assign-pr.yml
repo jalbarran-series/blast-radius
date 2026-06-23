@@ -1,7 +1,8 @@
 # >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
-# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
-# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
-# merge-policy-gate status is required. Ported from series-ai/venus.
+# Set the ai-review model's API key secret (one of ANTHROPIC_API_KEY,
+# OPENAI_API_KEY, or GEMINI_API_KEY — match AI_REVIEW_MODEL in bot-ai-review.yml),
+# fill the reviewer pool / AUTHOR_OVERRIDES in auto-assign, and configure branch
+# rulesets so the merge-policy-gate status is required. Ported from series-ai/venus.
 
 name: "Bot: auto-assign PR reviewer (tier-aware)"
 
@@ -24,7 +25,7 @@ name: "Bot: auto-assign PR reviewer (tier-aware)"
 #             shortcut (assigning would force an approval, removing po-verified).
 #   Tier 2 @ low, Tier 1 @ low/med, Tier 0 -> no assignment (auto-merge / inert).
 # Tier 1/2 need the AI risk verdict, so this runs after BOTH "Bot: Blast Radius"
-# and "Bot: AI Review (Opus)" complete (whichever lands last re-evaluates).
+# and "Bot: AI Review" complete (whichever lands last re-evaluates).
 # An existing/manual assignee is left as-is, with ONE exception: a Tier-3 PR
 # whose assignee is not an owner is reassigned to the owner (closes the
 # Tier-2 -> Tier-3 escalation hole where a load-balanced non-owner would gate a
@@ -39,7 +40,7 @@ on:
   workflow_run:
     # Both: blast-radius gives the tier; ai-review gives the risk (needed to
     # decide Tier-1/2 high-risk). Whichever finishes last re-evaluates.
-    workflows: ["Bot: Blast Radius", "Bot: AI Review (Opus)"]
+    workflows: ["Bot: Blast Radius", "Bot: AI Review"]
     types: [completed]
 
 permissions:
@@ -118,7 +119,7 @@ jobs:
             // shortcut (not assigned); Tier 1/2 low auto-merge. Tier 1/2 need the AI
             // risk verdict; require ai-review-gate GREEN (so risk is final — avoids
             // the pending-window race). If it isn't green yet, skip — this re-fires
-            // when "Bot: AI Review (Opus)" completes.
+            // when "Bot: AI Review" completes.
             // Tier 3 falls through to owner assignment (risk-independent). Tier 1/2
             // are assigned ONLY at high risk (the policy's 'approval' cases).
             if (tier !== 3) {

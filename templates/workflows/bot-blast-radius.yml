@@ -1,7 +1,8 @@
 # >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
-# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
-# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
-# merge-policy-gate status is required. Ported from series-ai/venus.
+# Set the ai-review model's API key secret (one of ANTHROPIC_API_KEY,
+# OPENAI_API_KEY, or GEMINI_API_KEY — match AI_REVIEW_MODEL in bot-ai-review.yml),
+# fill the reviewer pool / AUTHOR_OVERRIDES in auto-assign, and configure branch
+# rulesets so the merge-policy-gate status is required. Ported from series-ai/venus.
 
 name: "Bot: Blast Radius"
 

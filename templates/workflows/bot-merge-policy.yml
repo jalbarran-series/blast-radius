@@ -1,7 +1,8 @@
 # >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
-# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
-# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
-# merge-policy-gate status is required. Ported from series-ai/venus.
+# Set the ai-review model's API key secret (one of ANTHROPIC_API_KEY,
+# OPENAI_API_KEY, or GEMINI_API_KEY — match AI_REVIEW_MODEL in bot-ai-review.yml),
+# fill the reviewer pool / AUTHOR_OVERRIDES in auto-assign, and configure branch
+# rulesets so the merge-policy-gate status is required. Ported from series-ai/venus.
 
 name: "Bot: Merge Policy"
 
@@ -24,8 +25,8 @@ name: "Bot: Merge Policy"
 #     label is a declaration change, not a code change. Stale-tier-after-label
 #     races are therefore safety-neutral: the merged code stays dark.
 #  2. The AI verdict is a function of the CODE (diff at a SHA), independent of
-#     tier/labels — so we do NOT re-run Opus on label/body changes, and reuse
-#     the SHA-pinned verdict when only the tier changes. But Opus is
+#     tier/labels — so we do NOT re-run the AI review on label/body changes, and
+#     reuse the SHA-pinned verdict when only the tier changes. But the model is
 #     non-deterministic, so whenever it DOES re-run on the same SHA (reopen /
 #     dispatch) it first resets `ai-review-gate` to pending, ensuring the latest
 #     run's verdict gates rather than a stale lenient one.
@@ -44,7 +45,7 @@ on:
     # everything else so unrelated comments don't spin up a runner).
     types: [created]
   workflow_run:
-    workflows: ["Bot: AI Review (Opus)", "Bot: Blast Radius"]
+    workflows: ["Bot: AI Review", "Bot: Blast Radius"]
     types: [completed]
   # The open-PR backfill dispatches this gate DIRECTLY. A `workflow_dispatch`
   # run of blast-radius/ai-review produces a `workflow_run` event with an empty

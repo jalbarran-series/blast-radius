@@ -1,22 +1,25 @@
 # >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
-# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
-# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
-# merge-policy-gate status is required. Ported from series-ai/venus.
+# Set the API key secret for whichever model AI_REVIEW_MODEL selects
+# (ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY — see the env block
+# below), fill the reviewer pool / AUTHOR_OVERRIDES in auto-assign, and
+# configure branch rulesets so the merge-policy-gate status is required.
+# Ported from series-ai/venus.
 
-name: "Bot: AI Review (Opus)"
+name: "Bot: AI Review"
 
-# Mandatory pre-merge AI review. Runs Opus over the diff and posts the
-# `ai-review-gate` commit status: red while the review reports any blocker.
-# Tier-0 (inert) PRs skip Opus and auto-pass. The blast tier is computed
-# in-workflow (not read from the label) so a stale label can't skip Opus.
+# Mandatory pre-merge AI review. Runs the configured model over the diff and
+# posts the `ai-review-gate` commit status: red while the review reports any
+# blocker. Tier-0 (inert) PRs skip the review and auto-pass. The blast tier is
+# computed in-workflow (not read from the label) so a stale label can't skip
+# the review.
 
 on:
-  # INVARIANT: the Opus verdict is a function of the CODE (the diff at a SHA),
+  # INVARIANT: the AI verdict is a function of the CODE (the diff at a SHA),
   # not the tier or labels. A flag label/`Flag:` body change only moves a PR
-  # between tier 2 and tier 1 (flag-cap) — it never changes whether Opus runs
-  # (both tiers run it) and never invalidates the verdict. So we deliberately do
-  # NOT trigger on labeled/unlabeled/edited/assigned: that would force a full
-  # Opus re-run (cost + latency) on every po-verified label or assignee change
+  # between tier 2 and tier 1 (flag-cap) — it never changes whether the review
+  # runs (both tiers run it) and never invalidates the verdict. So we
+  # deliberately do NOT trigger on labeled/unlabeled/edited/assigned: that would
+  # force a full re-review (cost + latency) on every po-verified label or assignee change
   # for no safety gain. blast-radius handles the tier refresh; merge-policy reuses this
   # SHA-pinned verdict with the refreshed tier.
   pull_request:
@@ -38,11 +41,22 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Override via repo variable AI_REVIEW_MODEL. Default is the latest Opus the
-  # pinned @mariozechner/pi-coding-agent@0.70.0 registry actually has
-  # (claude-opus-4-8 is NOT in that registry — it would error). Bump this AND
-  # the pi-coding-agent pin together when a newer Opus lands in the catalog.
+  # The reviewer model. Provider-agnostic: any model the pinned
+  # @mariozechner/pi-coding-agent registry exposes works here. Override per repo
+  # via the AI_REVIEW_MODEL repo variable, e.g.:
+  #   anthropic/claude-opus-4-7   (default; needs ANTHROPIC_API_KEY)
+  #   openai/gpt-5                (needs OPENAI_API_KEY)
+  #   google/gemini-2.5-pro       (needs GEMINI_API_KEY)
+  # Set the matching secret in the review step's env below. The model string
+  # must exist in the pinned pi-coding-agent registry or the run errors — bump
+  # the pin and this default together when adopting a newer model.
   AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'anthropic/claude-opus-4-7' }}
+  # Reasoning effort for the reviewer. Override via the AI_REVIEW_THINKING repo
+  # variable; one of: off | minimal | low | medium | high | xhigh. Empty (the
+  # default) leaves the model/provider default untouched. It is composed onto
+  # the model as pi's `provider/id:<level>` shorthand — so do NOT also append a
+  # `:level` to AI_REVIEW_MODEL (that would double the suffix and error).
+  AI_REVIEW_THINKING: ${{ vars.AI_REVIEW_THINKING || '' }}
 
 jobs:
   review:
@@ -78,7 +92,7 @@ jobs:
         env:
           BASE: ${{ steps.pr.outputs.base }}
         run: |
-          # Trusted base-ref classifier + config AND the Opus review prompt — a
+          # Trusted base-ref classifier + config AND the AI review prompt — a
           # PR must not be able to weaken the rules OR the reviewer's
           # instructions that grade it. (.github/prompts is also self-protected
           # in classify.ts / config.yml / CODEOWNERS as defense in depth.)
@@ -94,7 +108,7 @@ jobs:
             echo "Base has no .github/prompts yet (bootstrap); using PR-head copy"
           fi
 
-      - name: Compute blast tier (Tier 0 skips Opus)
+      - name: Compute blast tier (Tier 0 skips review)
         id: tier
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,7 +120,7 @@ jobs:
           git fetch --no-tags origin "$BASE" || true
           gh pr diff "$PR" --repo "$REPO" --name-only > /tmp/files.txt
           gh pr diff "$PR" --repo "$REPO" > /tmp/diff.txt
-          # Pre-fetch PR metadata here (this step holds the token) so the Opus
+          # Pre-fetch PR metadata here (this step holds the token) so the review
           # step needs no GitHub access of its own.
           gh pr view "$PR" --repo "$REPO" --json title,body,files > /tmp/prmeta.json
           FLAG=$(gh pr view "$PR" --repo "$REPO" --json labels,body --jq '
@@ -119,10 +133,10 @@ jobs:
           echo "tier=$T" >> "$GITHUB_OUTPUT"
 
       - name: Invalidate any prior verdict (reset gate to pending before re-review)
-        # When Opus genuinely re-runs on the SAME head SHA (reopened,
+        # When the review genuinely re-runs on the SAME head SHA (reopened,
         # workflow_dispatch backfill), reset the gate first so a prior `success`
-        # can't keep auto-merge armed while the new run is in flight. Opus is
-        # non-deterministic, so the latest run's verdict — not a stale lenient
+        # can't keep auto-merge armed while the new run is in flight. The model
+        # is non-deterministic, so the latest run's verdict — not a stale lenient
         # one — must gate. (We do NOT re-run on label/body changes; see the
         # `on:` note.) The publish step (always()) re-posts success/failure.
         if: ${{ steps.tier.outputs.tier != '0' }}
@@ -132,13 +146,26 @@ jobs:
           gh api -X POST "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head }}" \
             -f state=pending -f context=ai-review-gate -f description="review in progress"
 
-      - name: Tier-0 short-circuit (skip Opus)
+      - name: Tier-0 short-circuit (skip review)
         if: ${{ steps.tier.outputs.tier == '0' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api -X POST "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head }}" \
-            -f state=success -f context=ai-review-gate -f description="tier 0 (inert) — Opus skipped"
+            -f state=success -f context=ai-review-gate -f description="tier 0 (inert) — review skipped"
+
+      - name: Validate thinking level
+        # Fail fast with a clear message when AI_REVIEW_THINKING is fat-fingered
+        # (easy to do while tinkering) instead of letting pi error opaquely deep
+        # in the untrusted review step. Empty = use the provider default.
+        if: ${{ steps.tier.outputs.tier != '0' && env.AI_REVIEW_THINKING != '' }}
+        run: |
+          case "$AI_REVIEW_THINKING" in
+            off|minimal|low|medium|high|xhigh) : ;;
+            *)
+              echo "::error::AI_REVIEW_THINKING='$AI_REVIEW_THINKING' is invalid. Use one of: off, minimal, low, medium, high, xhigh (or unset it)."
+              exit 1 ;;
+          esac
 
       - name: Build review prompt
         if: ${{ steps.tier.outputs.tier != '0' }}
@@ -159,24 +186,24 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ai-review"
           echo "dir=$RUNNER_TEMP/ai-review" >> "$GITHUB_OUTPUT"
 
-      - name: Harden — strip git push credential before the untrusted Opus step
+      - name: Harden — strip git push credential before the untrusted review step
         if: ${{ steps.tier.outputs.tier != '0' }}
         run: |
-          # The Opus step reviews attacker-controlled diff/tree. We already
+          # The review step reviews attacker-controlled diff/tree. We already
           # withhold GH_TOKEN from it; also remove the persisted git credential
           # so a prompt-injected agent cannot `git push`. (We keep the
           # credential through the base-ref fetch above, then drop it here.)
           git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
 
-      - name: Review with Pi (Opus)
+      - name: Review with Pi
         if: ${{ steps.tier.outputs.tier != '0' }}
         uses: ./.github/actions/pi-agent
         with:
-          model: ${{ env.AI_REVIEW_MODEL }}
+          model: ${{ env.AI_REVIEW_THINKING != '' && format('{0}:{1}', env.AI_REVIEW_MODEL, env.AI_REVIEW_THINKING) || env.AI_REVIEW_MODEL }}
           prompt-text: ${{ env.REVIEW_PROMPT }}
           pr-output-dir: ${{ steps.prdir.outputs.dir }}
           log-mode: progress
-        # Deliberately NO GH_TOKEN: Opus reviews attacker-controlled input
+        # Deliberately NO GH_TOKEN: the reviewer reads attacker-controlled input
         # (diff/tree). It reads the pre-fetched /tmp/diff.txt, /tmp/files.txt,
         # /tmp/prmeta.json and the checked-out tree — no GitHub access. Worst
         # case for a prompt-injected diff is a lenient verdict, not a forged
@@ -187,7 +214,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Publish ai-review-gate status
-        # always() so a crashed/timed-out Opus run still posts a status — a
+        # always() so a crashed/timed-out review run still posts a status — a
         # never-posted required check would block the PR forever.
         if: ${{ always() && steps.tier.outputs.tier != '0' }}
         uses: actions/github-script@v7
@@ -210,7 +237,7 @@ jobs:
             try {
               review = JSON.parse(fs.readFileSync('ai-review.json', 'utf8'));
             } catch (e) {
-              return postError('Opus produced no/invalid ai-review.json (run may have failed or timed out)');
+              return postError('AI review produced no/invalid ai-review.json (run may have failed or timed out)');
             }
             // Reject valid-but-degenerate output: a model that omits `blockers`
             // or `risk` must NOT pass silently as "no blockers".
@@ -231,7 +258,7 @@ jobs:
               : '_No blockers found._';
             const body = [
               marker,
-              `### AI review (${process.env.AI_REVIEW_MODEL}) — risk: **${risk}**`,
+              `### AI review (${process.env.AI_REVIEW_MODEL}${process.env.AI_REVIEW_THINKING ? `, thinking: ${process.env.AI_REVIEW_THINKING}` : ''}) — risk: **${risk}**`,
               '',
               blockers.length ? '**Blockers (must be resolved before merge):**' : '✅ No blockers.',
               list,
@@ -253,3 +280,4 @@ jobs:
             await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
         env:
           AI_REVIEW_MODEL: ${{ env.AI_REVIEW_MODEL }}
+          AI_REVIEW_THINKING: ${{ env.AI_REVIEW_THINKING }}
