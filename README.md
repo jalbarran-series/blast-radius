@@ -53,10 +53,10 @@ default) — don't bake a `:level` into `AI_REVIEW_MODEL` yourself.
 ## CLI
 
 ```bash
-blast-radius install [dir]       # scaffold engine + workflows + starter config + skill
-blast-radius update  [dir]       # pull latest framework files; surface workflow drift
-blast-radius doctor  [dir]       # validate config.yml + owners (no orphan owners)
-blast-radius classify <file>...  # print the tier for a set of changed files
+npx @series-inc/blast-radius install [dir]       # scaffold engine + workflows + starter config + skill
+npx @series-inc/blast-radius update  [dir]       # pull latest framework files; surface workflow drift
+npx @series-inc/blast-radius doctor  [dir]       # validate config.yml + owners (no orphan owners)
+npx @series-inc/blast-radius classify <file>...  # print the tier for a set of changed files
 ```
 
 `update` refreshes the framework-owned files in place (compiled engine + the
