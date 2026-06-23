@@ -8,13 +8,16 @@ export const FRAMEWORK_ROOT = join(HERE, '..', '..');
 
 // Compiled standalone bundles consumers run with zero install (deps inlined).
 // The framework-only cli-classify.mjs is not shipped to consumers.
-const ENGINE_RUNTIME = [
+export const ENGINE_RUNTIME = [
   'classify.mjs',
   'ownersConfig.mjs',
   'checkOwnersConfig.mjs',
   'runClassify.mjs',
   'runAssign.mjs',
 ];
+
+// Agent runtimes that get the `/blast-radius` skill. Framework-owned everywhere.
+export const AGENT_SKILL_DIRS = ['.claude/skills', '.cursor/skills', '.agents/skills'];
 
 const log = (s) => console.log(s);
 
@@ -28,21 +31,53 @@ function copyFile(src, dest, { overwrite }) {
   log(`  ${existsSync(dest) ? 'wrote' : 'wrote'}          ${dest}`);
 }
 
-export function scaffold(targetDir) {
-  const br = join(targetDir, '.github', 'blast-radius');
-  const tpl = join(FRAMEWORK_ROOT, 'templates');
+// The compiled bundles must exist — build on demand if missing. Shared by
+// install + update so neither ever scaffolds a stale/absent dist/engine.
+export function ensureEngineBuilt() {
   const eng = join(FRAMEWORK_ROOT, 'dist', 'engine');
-
-  // The compiled bundles must exist — build on demand if missing.
   if (!existsSync(join(eng, 'classify.mjs'))) {
     log('Building engine bundles (dist/engine missing)…');
     execFileSync('node', [join(FRAMEWORK_ROOT, 'scripts', 'build-engine.mjs')], { stdio: 'inherit' });
   }
+  return eng;
+}
+
+// ── Framework-owned writers (always overwrite) ───────────────────────────────
+// Single source of truth for "what the framework owns": install and update both
+// call these so the two paths can never drift on which files get refreshed.
+
+export function writeEngineRuntime(targetDir) {
+  const br = join(targetDir, '.github', 'blast-radius');
+  const eng = ensureEngineBuilt();
+  for (const f of ENGINE_RUNTIME) copyFile(join(eng, f), join(br, f), { overwrite: true });
+}
+
+export function writeEnginePackageJson(targetDir) {
+  const br = join(targetDir, '.github', 'blast-radius');
+  const tpl = join(FRAMEWORK_ROOT, 'templates');
+  copyFile(join(tpl, 'blast-radius.package.json'), join(br, 'package.json'), { overwrite: true });
+}
+
+export function writeSkill(targetDir) {
+  const skillSrc = readFileSync(join(FRAMEWORK_ROOT, 'skill', 'SKILL.src.md'), 'utf8');
+  const refDir = join(FRAMEWORK_ROOT, 'skill', 'reference');
+  for (const dir of AGENT_SKILL_DIRS) {
+    const skillDir = join(targetDir, dir, 'blast-radius');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), skillSrc);
+    cpSync(refDir, join(skillDir, 'reference'), { recursive: true });
+    log(`  wrote          ${join(targetDir, dir, 'blast-radius')}/`);
+  }
+}
+
+export function scaffold(targetDir) {
+  const br = join(targetDir, '.github', 'blast-radius');
+  const tpl = join(FRAMEWORK_ROOT, 'templates');
 
   log(`Scaffolding blast-radius into ${targetDir}`);
 
   // 1. Engine runtime (compiled .mjs) — framework-owned, always overwrite.
-  for (const f of ENGINE_RUNTIME) copyFile(join(eng, f), join(br, f), { overwrite: true });
+  writeEngineRuntime(targetDir);
 
   // 2. Per-repo surface — never clobber once a repo owns it.
   copyFile(join(tpl, 'config.yml'), join(br, 'config.yml'), { overwrite: false });
@@ -50,7 +85,7 @@ export function scaffold(targetDir) {
   copyFile(join(tpl, 'config.validate.test.ts'), join(br, 'config.validate.test.ts'), { overwrite: false });
 
   // 3. Engine package.json — framework-owned, overwrite.
-  copyFile(join(tpl, 'blast-radius.package.json'), join(br, 'package.json'), { overwrite: true });
+  writeEnginePackageJson(targetDir);
 
   // 4. PR template — per-repo, don't clobber.
   copyFile(join(tpl, 'PULL_REQUEST_TEMPLATE.md'), join(targetDir, '.github', 'PULL_REQUEST_TEMPLATE.md'), {
@@ -65,15 +100,7 @@ export function scaffold(targetDir) {
 
   // 6. Agent skill — framework-owned, installed into every agent dir (so the
   //    repo's Claude / Cursor / Codex+Pi agents all gain `/blast-radius`).
-  const skillSrc = readFileSync(join(FRAMEWORK_ROOT, 'skill', 'SKILL.src.md'), 'utf8');
-  const refDir = join(FRAMEWORK_ROOT, 'skill', 'reference');
-  for (const dir of ['.claude/skills', '.cursor/skills', '.agents/skills']) {
-    const skillDir = join(targetDir, dir, 'blast-radius');
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, 'SKILL.md'), skillSrc);
-    cpSync(refDir, join(skillDir, 'reference'), { recursive: true });
-    log(`  wrote          ${join(targetDir, dir, 'blast-radius')}/`);
-  }
+  writeSkill(targetDir);
 
   log('');
   log('Installed. Next:');

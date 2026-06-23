@@ -26,6 +26,7 @@ series-ai/venus and generalized.
 | Engine tests | `npm test` (vitest against `engine/`) |
 | Build skill into agent dirs | `npm run build:skills` |
 | Scaffold into a repo | `node cli/bin/cli.js install <dir>` |
+| Update an installed repo | `node cli/bin/cli.js update <dir>` |
 | Validate a repo's config | `node cli/bin/cli.js doctor <dir>` |
 | Classify files | `node cli/bin/cli.js classify <file>...` |
 
@@ -49,6 +50,7 @@ series-ai/venus and generalized.
 engine/__fixtures__/   generic config + owners for engine tests (product-agnostic)
 engine/classify.ts     core tiering + hardcoded self-protect floor
 templates/             scaffolded into consumers' .github/ and .claude/
-cli/lib/scaffold.mjs   the copy logic (what overwrites vs what's preserved)
+cli/lib/scaffold.mjs   install copy logic + framework-owned writers (overwrite vs preserved)
+cli/lib/update.mjs     update: refresh framework files, write <file>.new on workflow drift
 skill/SKILL.src.md     the one true skill source
 ```

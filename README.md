@@ -54,9 +54,16 @@ default) — don't bake a `:level` into `AI_REVIEW_MODEL` yourself.
 
 ```bash
 blast-radius install [dir]       # scaffold engine + workflows + starter config + skill
+blast-radius update  [dir]       # pull latest framework files; surface workflow drift
 blast-radius doctor  [dir]       # validate config.yml + owners (no orphan owners)
 blast-radius classify <file>...  # print the tier for a set of changed files
 ```
+
+`update` refreshes the framework-owned files in place (compiled engine + the
+`/blast-radius` skill) and, for the vendored workflows + PR template, writes a
+non-destructive `<file>.new` next to any file that drifted from the current
+template — diff, merge what you want, then delete the `.new`. It never touches
+your `config.yml`, `owners`, or `config.validate.test.ts`.
 
 Agent commands (from the installed skill): `/blast-radius init`, `/blast-radius explain`.
 

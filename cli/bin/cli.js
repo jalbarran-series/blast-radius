@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { FRAMEWORK_ROOT, scaffold } from '../lib/scaffold.mjs';
+import { update } from '../lib/update.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -21,6 +22,7 @@ function help() {
 
 Usage:
   blast-radius install [targetDir]      Scaffold engine + workflows + starter config + skill
+  blast-radius update  [targetDir]      Refresh framework files; surface workflow drift as .new
   blast-radius doctor  [targetDir]      Validate this repo's config.yml + owners
   blast-radius classify <file>...       Print the tier for a set of changed files
   blast-radius help
@@ -29,6 +31,8 @@ After install, run \`/blast-radius init\` in your agent to tailor config.yml + o
 
 Notes:
   - install never clobbers config.yml / owners / workflows once a repo owns them.
+  - update overwrites framework files (engine + skill) and writes <file>.new for
+    workflows/PR template that drifted from the templates (never clobbers them).
   - doctor + classify use the config at <repo>/.github/blast-radius/config.yml
     (override with --config <path>).`);
 }
@@ -37,6 +41,12 @@ switch (cmd) {
   case 'install': {
     const target = resolve(rest[0] || '.');
     scaffold(target);
+    break;
+  }
+
+  case 'update': {
+    const target = resolve(rest[0] || '.');
+    update(target);
     break;
   }
 
