@@ -10,7 +10,7 @@ name: "Bot: Merge Policy"
 # status), AI verdict + risk (`ai-review-gate` status), human approval, the
 # po-verified label, and the assignee-present (force-human-review) signal into the
 # `merge-policy-gate` commit status, and enables GitHub native auto-merge for
-# qualifying Tier-<3 PRs targeting develop.
+# qualifying Tier-<3 PRs targeting the default branch (main).
 #
 # Recomputes on: PR events (labels/commits/body edits), reviews, and after the
 # blast-radius / ai-review workflows finish (workflow_run) so a status flip
@@ -295,7 +295,7 @@ jobs:
             const approverSet = new Set(approverLogins.map((l) => l.toLowerCase()));
             const assigneeApproved = assigneeLogins.length > 0
               && !changesRequested && assigneeLogins.some((a) => approverSet.has(a));
-            const allowedBases = (process.env.AUTOMERGE_BASES || 'develop')
+            const allowedBases = (process.env.AUTOMERGE_BASES || 'main')
               .split(',').map((s) => s.trim()).filter(Boolean);
             const baseOk = allowedBases.includes(prData.base.ref);
 
@@ -404,7 +404,7 @@ jobs:
             const policyState = satisfied ? 'success' : (aiBlocked ? 'failure' : 'pending');
 
             // ---- arm / disarm native auto-merge ----
-            // Arm ONLY for a satisfied, Tier-<3, develop-targeting PR. In EVERY
+            // Arm ONLY for a satisfied, Tier-<3, main-targeting PR. In EVERY
             // other case (tier 3, wrong base, or unsatisfied) actively DISARM —
             // a PRIOR commit may have armed auto-merge before this commit became
             // tier 3 / unsatisfied, and GitHub's auto-merge persists across

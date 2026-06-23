@@ -110,7 +110,7 @@ into the review step, but only the matching one is read.
 | `AI_REVIEW_THINKING` | _(empty)_ | `bot-ai-review` | Reasoning effort: `off \| minimal \| low \| medium \| high \| xhigh`. Empty = provider default. Don't bake a `:level` into `AI_REVIEW_MODEL` yourself. |
 | `AUTOASSIGN_ENABLED` | `false` (off) | `bot-auto-assign-pr` | Set to `true` to turn on reviewer auto-assignment. |
 | `AUTOASSIGN_POOL` | `[]` | `bot-auto-assign-pr` | JSON array of `{ login, pausedUntil?, reason? }` — the reviewer pool with OOO awareness. |
-| `AUTOMERGE_BASES` | `develop` | `bot-merge-policy` | Comma-separated base branches eligible for auto-merge. |
+| `AUTOMERGE_BASES` | `main` | `bot-merge-policy` | Comma-separated base branches eligible for auto-merge. |
 | `MERGE_APP_ID` | _(empty)_ | `bot-merge-policy` | GitHub App id paired with `MERGE_APP_PRIVATE_KEY`. Empty → app-merge disabled (uses `GITHUB_TOKEN`). |
 
 Fastest path to a working AI-review gate:
