@@ -1,0 +1,177 @@
+# >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
+# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
+# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
+# merge-policy-gate status is required. Ported from series-ai/venus.
+
+name: "Bot: Blast Radius"
+
+# Classifies each PR's blast radius (tier 0-3) with the deterministic classifier
+# in .github/blast-radius/, labels the PR `blast:N`, and upserts a sticky comment
+# explaining why. No `paths:` filter — the label/comment apply to every PR.
+
+on:
+  pull_request:
+    # `unlabeled` + `edited` so removing a `flag:` label or editing the `Flag:`
+    # body line re-classifies (the SHA-pinned tier status would otherwise go stale).
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number (used by the open-PR backfill)"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: blast-radius-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NUM="${{ github.event.pull_request.number || inputs.pr }}"
+          read -r HEAD BASE < <(gh pr view "$NUM" --repo "$REPO" \
+            --json headRefOid,baseRefName --jq '"\(.headRefOid) \(.baseRefName)"')
+          {
+            echo "num=$NUM"
+            echo "head=$HEAD"
+            echo "base=$BASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Use base-ref classifier (prevent self-downgrade)
+        env:
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          # Run the classifier + config from the TRUSTED base ref, not the PR
+          # head, so a PR cannot weaken its own classification. Inputs (the diff
+          # and the touched source files) still come from the PR head.
+          git fetch --no-tags origin "$BASE" || true
+          if git checkout "origin/$BASE" -- .github/blast-radius 2>/dev/null; then
+            echo "Using base-ref classifier from origin/$BASE"
+          else
+            echo "Base has no .github/blast-radius yet (bootstrap); using PR-head copy"
+          fi
+
+      - name: Install classifier deps
+        working-directory: .github/blast-radius
+        run: npm ci
+
+      - name: Guard — no orphan owners (owners ⊆ config tier 3)
+        env:
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          set -euo pipefail
+          # Lint the PR-HEAD copies (the working tree holds the base-ref overlay),
+          # so a PR that adds an inert owner — owned but not Tier-3 — is caught.
+          # A PR head that predates the blast-radius feature carries neither file;
+          # fall back to the base-ref copies (CI keeps owners ⊆ config there), since
+          # such a PR cannot introduce an orphan owner.
+          git fetch --no-tags origin "$BASE" || true
+          git show "HEAD:.github/blast-radius/owners" > /tmp/owners.head 2>/dev/null \
+            || git show "origin/$BASE:.github/blast-radius/owners" > /tmp/owners.head
+          git show "HEAD:.github/blast-radius/config.yml" > /tmp/config.head.yml 2>/dev/null \
+            || git show "origin/$BASE:.github/blast-radius/config.yml" > /tmp/config.head.yml
+          npx --prefix .github/blast-radius tsx .github/blast-radius/checkOwnersConfig.ts \
+            --owners /tmp/owners.head --cfg /tmp/config.head.yml
+
+      - name: Classify
+        id: run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.num }}
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE" || true
+          gh pr diff "$PR" --repo "$REPO" --name-only > /tmp/files.txt
+          gh pr diff "$PR" --repo "$REPO" > /tmp/diff.txt
+          FLAG=$(gh pr view "$PR" --repo "$REPO" --json labels,body --jq '
+            ([.labels[].name | select(startswith("flag:")) | sub("flag:";"")]
+             + [ (.body // "") | capture("(?im)^Flag:\\s*(?<n>[A-Z0-9_]+)").n ])
+            | map(select(. != null and . != "")) | .[0] // ""' 2>/dev/null || echo "")
+          npx --prefix .github/blast-radius tsx .github/blast-radius/runClassify.ts \
+            --files /tmp/files.txt --diff /tmp/diff.txt --flag "$FLAG" \            --base "origin/$BASE" > /tmp/result.json
+          echo "Result:" && cat /tmp/result.json
+
+      - name: Label + sticky comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync('/tmp/result.json', 'utf8'));
+            const pr = Number('${{ steps.pr.outputs.num }}');
+            const tier = result.tier;
+            const { owner, repo } = context.repo;
+
+            const colors = ['0e8a16', 'c2e0c6', 'fbca04', 'd93f0b'];
+            for (const t of [0, 1, 2, 3]) {
+              try {
+                await github.rest.issues.createLabel({ owner, repo, name: `blast:${t}`, color: colors[t] });
+              } catch (e) { /* exists */ }
+            }
+
+            const cur = await github.rest.issues.listLabelsOnIssue({ owner, repo, issue_number: pr });
+            for (const l of cur.data) {
+              if (l.name.startsWith('blast:') && l.name !== `blast:${tier}`) {
+                try { await github.rest.issues.removeLabel({ owner, repo, issue_number: pr, name: l.name }); } catch (e) {}
+              }
+            }
+            await github.rest.issues.addLabels({ owner, repo, issue_number: pr, labels: [`blast:${tier}`] });
+
+            // SHA-pinned tier status — this is the source of truth the
+            // merge-policy gate reads (the `blast:N` label is for humans and
+            // can lag a push). Tying the tier to the head SHA closes the race
+            // where a stale label could let a raised-blast push merge as a
+            // lower tier.
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha: '${{ steps.pr.outputs.head }}',
+              context: 'blast-radius', state: 'success', description: `tier ${tier}`,
+            });
+
+            const marker = '<!-- blast-radius:v1 -->';
+            const reasons = (result.reasons || []).map((r) => `- ${r}`).join('\n') || '- inert change';
+            const body = [
+              marker,
+              `### Blast radius: **Tier ${tier}**`,
+              '',
+              reasons,
+              '',
+              '<sub>Auto-classified by blast-radius bot; re-runs on every push. '
+                + 'To force a human review regardless of tier, add an assignee to the PR.</sub>',
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
+            const existing = comments.find((c) => c.body && c.body.startsWith(marker));
+            if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
+
+      - name: Signal classification failure (so merge-policy fails, not wedges)
+        if: ${{ failure() && steps.pr.outputs.head != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head }}" \
+            -f state=failure -f context=blast-radius -f description="classification failed" || true

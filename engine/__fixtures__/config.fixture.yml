@@ -1,0 +1,65 @@
+# Generic fixture config for ENGINE tests only.
+# Product-agnostic on purpose: the engine must classify correctly without any
+# real repo's paths baked in. Consumers scaffold their own config from
+# templates/config.yml via `blast-radius init` — they never touch this file.
+tiers:
+  "3":
+    - ".github/workflows/**"
+    - ".github/blast-radius/**"
+    - ".github/prompts/**"
+    - "CODEOWNERS"
+    - "src/auth/**"
+    - "src/**/*payment*"
+    - "migrations/**"
+    - "packages/*/src/index.ts"
+  "2":
+    - "src/**"
+    - "packages/*/src/**"
+  "0":
+    - "docs/**"
+    - "**/*.md"
+    - ".plans/**"
+    - "**/locales/**"
+default_tier: 2
+generated:
+  - "**/package-lock.json"
+  - "**/*.lock"
+  - "**/__snapshots__/**"
+  - "**/*.generated.ts"
+inert_asset_extensions:
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".gif"
+  - ".svg"
+  - ".webp"
+  - ".ico"
+  - ".pdf"
+  - ".mp4"
+  - ".mov"
+auto_reachable:
+  - ".github/workflows/**"
+  - "migrations/**"
+escalations:
+  - name: secret-handling
+    reason: "Touches secret/credential handling — review for key exposure."
+    paths: ["src/**", "packages/**"]
+    pattern: "API_KEY|SECRET|PRIVATE_KEY"
+    tier: 3
+workflow_inert:
+  allow:
+    - '^\s*$'
+    - "^\\s*--set-env-vars=\\w+=\\$\\{\\{\\s*(vars|env)\\.\\w+(\\s*\\|\\|\\s*'[A-Za-z0-9._:/-]*')?\\s*\\}\\}\\s*\\\\?\\s*$"
+  deny:
+    - 'secrets\.'
+    - '^\s*permissions:'
+    - 'pull_request_target|workflow_run|workflow_call'
+    - '^\s*on:'
+    - '^\s*uses:'
+    - '^\s*-?\s*run:'
+    - 'id-token|GH_TOKEN'
+sentinel:
+  token: "blast-radius:t3"
+  region_start: "blast-radius:t3:start"
+  region_end: "blast-radius:t3:end"
+  tier: 3

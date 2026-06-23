@@ -1,0 +1,104 @@
+# Blast-radius classifier configuration.
+#
+# tier: 0 inert | 1 contained | 2 shared product code | 3 high blast / irreversible
+# Every changed file is matched against ALL tier globs and assigned the HIGHEST
+# tier whose glob it matches. PR tier = max(file tiers), then escalators in
+# classify.ts (add-only, flag-cap, content/sentinel escalation).
+#
+# This file is Tier-3 / self-protected — changes here are reviewed.
+#
+# >>> SCAFFOLDED STARTER — EDIT THE `tiers` BELOW FOR YOUR REPO. <<<
+# Replace the example src/** paths with your real sensitive surfaces (auth,
+# payments, migrations, public APIs, infra). Run `npm test` in this folder after
+# editing — config.validate.test.ts checks owners ⊆ Tier 3.
+tiers:
+  "3":
+    # Always sensitive — the automation that grades every PR (self-protected too).
+    - ".github/workflows/**"
+    - ".github/blast-radius/**"
+    - ".github/prompts/**"
+    - "CODEOWNERS"
+    # --- EDIT: your repo's high-blast / irreversible paths ---
+    - "src/auth/**"
+    - "src/**/*payment*"
+    - "migrations/**"
+    - "packages/*/src/index.ts"
+  "2":
+    # --- EDIT: your repo's shared product code ---
+    - "src/**"
+    - "packages/*/src/**"
+  "0":
+    - "docs/**"
+    - "**/*.md"
+    - ".plans/**"
+    - "**/locales/**"
+
+# Unknown / un-enumerated paths default to tier 2, NOT tier 1: an unknown path
+# must not be treated as flag-dark and silently auto-merged. Tier 2 is the safe fail.
+default_tier: 2
+
+# Files counted as mechanical — excluded from the "effective diff" and never
+# raise the tier on their own (still validated by CI).
+generated:
+  - "**/package-lock.json"
+  - "**/*.lock"
+  - "**/__snapshots__/**"
+  - "**/*.generated.ts"
+
+# Non-source assets. These never execute, so a change to one is inert -> tier 0.
+inert_asset_extensions:
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".gif"
+  - ".svg"
+  - ".webp"
+  - ".ico"
+  - ".pdf"
+  - ".mp4"
+  - ".mov"
+
+# Paths that go LIVE without being imported — auto-run on push/merge. An add-only
+# change here is NOT inert, so the add-only -> tier 0 escalator must NOT apply.
+auto_reachable:
+  - ".github/workflows/**"
+  - "migrations/**"
+
+# Content-level escalators. Each rule raises the PR to `tier` (default 3) when a
+# CHANGED line (added or removed), optionally restricted to `paths`, matches
+# `pattern` (JS regex). ADD FREELY — this file is Tier-3/self-protected.
+escalations:
+  - name: secret-handling
+    reason: "Touches secret/credential handling — review for key exposure."
+    paths: ["src/**", "packages/**"]
+    pattern: "API_KEY|SECRET|PRIVATE_KEY"
+    tier: 3
+
+# Inert workflow changes. Workflow edits are Tier-3-floored by default (they run
+# with secrets on same-repo PRs). This carves out the narrow safe case: a change
+# whose EVERY added/removed line matches `allow` and NONE matches `deny` drops to
+# Tier 2. Generic + safe — keep as-is unless you know what you're doing.
+workflow_inert:
+  allow:
+    - '^\s*$'
+    - "^\\s*--set-env-vars=\\w+=\\$\\{\\{\\s*(vars|env)\\.\\w+(\\s*\\|\\|\\s*'[A-Za-z0-9._:/-]*')?\\s*\\}\\}\\s*\\\\?\\s*$"
+  deny:
+    - 'secrets\.'
+    - '^\s*permissions:'
+    - 'pull_request_target|workflow_run|workflow_call'
+    - '^\s*on:'
+    - '^\s*uses:'
+    - '^\s*-?\s*run:'
+    - 'id-token|GH_TOKEN'
+
+# Inline sentinel markers. Annotate sensitive code in place — no config edit
+# needed. Touching a marked line, or any line inside a marked region, escalates.
+#   // blast-radius:t3 reason: order-sensitive boot step
+#   // blast-radius:t3:start reason: init sequence — review if touched
+#   ...code...
+#   // blast-radius:t3:end
+sentinel:
+  token: "blast-radius:t3"
+  region_start: "blast-radius:t3:start"
+  region_end: "blast-radius:t3:end"
+  tier: 3

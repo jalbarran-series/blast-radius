@@ -1,0 +1,10 @@
+# Generic fixture owners table for ENGINE tests only.
+# Every entry must classify Tier 3 under config.fixture.yml (the ownersConfig
+# test enforces this). Product-agnostic; consumers scaffold templates/owners.
+/.github/workflows/        @platform-team
+/.github/blast-radius/     @platform-team
+/.github/prompts/          @platform-team
+/CODEOWNERS                @platform-team
+/src/auth/**               @auth-team @platform-team
+/migrations/**             @data-team @platform-team
+/packages/*/src/index.ts   @platform-team

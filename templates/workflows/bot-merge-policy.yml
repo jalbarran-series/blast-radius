@@ -1,0 +1,509 @@
+# >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
+# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
+# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
+# merge-policy-gate status is required. Ported from series-ai/venus.
+
+name: "Bot: Merge Policy"
+
+# The single decision gate. Combines blast tier (SHA-pinned `blast-radius`
+# status), AI verdict + risk (`ai-review-gate` status), human approval, the
+# po-verified label, and the assignee-present (force-human-review) signal into the
+# `merge-policy-gate` commit status, and enables GitHub native auto-merge for
+# qualifying Tier-<3 PRs targeting develop.
+#
+# Recomputes on: PR events (labels/commits/body edits), reviews, and after the
+# blast-radius / ai-review workflows finish (workflow_run) so a status flip
+# re-triggers it. Always posts a status once a non-draft PR is resolved
+# (success / failure / pending) — never a bare return — so the required check
+# can't be left unposted.
+#
+# SOUNDNESS INVARIANTS (do not break these without re-reviewing the whole gate):
+#  1. Tier-1 (flag-dark) REQUIRES the code to be genuinely gated (classifier
+#     checks `getFlag('X')` in the diff + fallback not-on + live files gated).
+#     So the code is dark in prod regardless of the `flag:` label — removing the
+#     label is a declaration change, not a code change. Stale-tier-after-label
+#     races are therefore safety-neutral: the merged code stays dark.
+#  2. The AI verdict is a function of the CODE (diff at a SHA), independent of
+#     tier/labels — so we do NOT re-run Opus on label/body changes, and reuse
+#     the SHA-pinned verdict when only the tier changes. But Opus is
+#     non-deterministic, so whenever it DOES re-run on the same SHA (reopen /
+#     dispatch) it first resets `ai-review-gate` to pending, ensuring the latest
+#     run's verdict gates rather than a stale lenient one.
+#  3. Tier + AI verdict are SHA-pinned (commit statuses on the head SHA), so a
+#     new commit starts fresh — no status from a prior SHA can satisfy the gate.
+
+on:
+  pull_request:
+    # `assigned`/`unassigned` so adding/removing an assignee re-evaluates the
+    # force-human-review signal; labels/edited still affect po-verified etc.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited, assigned, unassigned]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issue_comment:
+    # `/po-verified` slash command (PR comments only; the job `if` filters out
+    # everything else so unrelated comments don't spin up a runner).
+    types: [created]
+  workflow_run:
+    workflows: ["Bot: AI Review (Opus)", "Bot: Blast Radius"]
+    types: [completed]
+  # The open-PR backfill dispatches this gate DIRECTLY. A `workflow_dispatch`
+  # run of blast-radius/ai-review produces a `workflow_run` event with an empty
+  # `pull_requests` array and `head_branch: <default>`, so the cascade above
+  # can't resolve the backfilled PR. Backfill order: dispatch blast-radius +
+  # ai-review first, then dispatch this once their statuses are posted.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number (used by the open-PR backfill)"
+        required: true
+        type: number
+
+permissions:
+  # `contents: write` is REQUIRED to arm native auto-merge — enablePullRequestAutoMerge
+  # fails with "Resource not accessible by integration" under `contents: read`.
+  contents: write
+  pull-requests: write
+  issues: write # apply the `po-verified` label + react to the /po-verified command
+  statuses: write
+
+# Key on the PR branch so the overlapping triggers (pull_request,
+# pull_request_review, and the two workflow_run completions) for the SAME PR
+# share one concurrency group — preventing duplicate sticky comments and
+# status/auto-merge races. All these events expose the head branch.
+concurrency:
+  group: merge-policy-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || inputs.pr || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  decide:
+    # Skip the runner for unrelated issue comments — only a PR comment containing
+    # `/po-verified` runs the job. Every other event type always runs.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && contains(github.event.comment.body, '/po-verified'))
+    runs-on: ubuntu-latest
+    # Opt in to `development` to read the env-scoped FACTORY_* app creds.
+    environment:
+      name: development
+      deployment: false
+    steps:
+      # Merge under the run-factory-bot app, not GITHUB_TOKEN: pushes made by
+      # GITHUB_TOKEN don't trigger `on: push` CD, so gate-merged PRs never
+      # deployed. FACTORY_APP_ID / FACTORY_APP_PRIVATE_KEY are the run-factory-bot
+      # app id + key (the same app + env vars/secrets already used by
+      # factory-agent-task.yml).
+      - name: Mint merge-bot token
+        id: app-token
+        # `if` can't gate on the secret (secrets aren't readable in step `if`),
+        # so a set app-id with a missing/invalid key would otherwise error here
+        # and wedge the gate. continue-on-error degrades to GITHUB_TOKEN (the
+        # `|| github.token` fallback below) instead of failing the whole job.
+        if: ${{ vars.FACTORY_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+
+      - name: Evaluate merge policy
+        uses: actions/github-script@v7
+        env:
+          # Comma-separated base branches eligible for native auto-merge.
+          # Defaults to `develop` when unset. Point it at a throwaway branch
+          # (e.g. test/automerge-staging) to exercise the real auto-merge flow
+          # off-develop before rollout; add `develop` to go live.
+          AUTOMERGE_BASES: ${{ vars.AUTOMERGE_BASES }}
+          # PR number when this gate is dispatched directly by the backfill.
+          PR_INPUT: ${{ inputs.pr }}
+        with:
+          # App token (so the merge push triggers CD), else GITHUB_TOKEN.
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+
+            // ---- resolve PR number across event types ----
+            let pr;
+            if (context.payload.pull_request) {
+              pr = context.payload.pull_request.number;
+            } else if (context.eventName === 'issue_comment') {
+              if (!context.payload.issue || !context.payload.issue.pull_request) { core.info('Comment is not on a PR; skipping.'); return; }
+              pr = context.payload.issue.number;
+            } else if (context.eventName === 'workflow_run') {
+              const wr = context.payload.workflow_run;
+              if (wr.pull_requests && wr.pull_requests.length) {
+                pr = wr.pull_requests[0].number;
+              } else {
+                const headLabel = `${wr.head_repository.owner.login}:${wr.head_branch}`;
+                const list = await github.rest.pulls.list({ owner, repo, state: 'open', head: headLabel });
+                if (list.data.length) pr = list.data[0].number;
+              }
+            } else if (context.eventName === 'workflow_dispatch') {
+              pr = Number(process.env.PR_INPUT) || undefined;
+            }
+            if (!pr) { core.info('No PR resolved for this event; nothing to do.'); return; }
+
+            const { data: prData } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
+            if (prData.state !== 'open') { core.info(`PR #${pr} not open; skipping.`); return; }
+            // Drafts: blast-radius / ai-review skip them, so there is no tier
+            // status to act on. Don't post a misleading gate; ready_for_review
+            // re-triggers everything.
+            if (prData.draft) { core.info(`PR #${pr} is a draft; skipping.`); return; }
+            const sha = prData.head.sha;
+            const labels = prData.labels.map((l) => l.name);
+
+            // ---- `/po-verified` slash command ----
+            // The PO (usually the PR author, who built + previewed the change)
+            // self-attests they verified the deploy preview. We apply the label
+            // HERE — a separate bot label-add via GITHUB_TOKEN would NOT re-trigger
+            // this gate — then fall through to the normal recompute, so the comment
+            // can clear (and merge) a medium-risk Tier-2 PR in one shot. Gated on
+            // real write access; the author IS allowed (a non-author would just
+            // approve instead).
+            if (context.eventName === 'issue_comment') {
+              const comment = context.payload.comment;
+              if (!/^\/po-verified\b/.test((comment.body || '').trim())) { core.info('Not a /po-verified command; skipping.'); return; }
+              const actor = comment.user.login;
+              let canVerify = false;
+              try {
+                const perm = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: actor });
+                canVerify = ['admin', 'maintain', 'write'].includes(perm.data.permission);
+              } catch (e) { core.info(`permission lookup failed for ${actor}: ${e.message}`); }
+              if (!canVerify) {
+                await github.rest.reactions.createForIssueComment({ owner, repo, comment_id: comment.id, content: 'confused' }).catch(() => {});
+                core.info(`/po-verified from ${actor} without write access; ignored.`);
+                return;
+              }
+              if (!labels.includes('po-verified')) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pr, labels: ['po-verified'] });
+                labels.push('po-verified');
+              }
+              await github.rest.reactions.createForIssueComment({ owner, repo, comment_id: comment.id, content: '+1' }).catch(() => {});
+              core.info(`po-verified applied by ${actor}; recomputing the gate.`);
+              // fall through — `labels` now includes po-verified
+            }
+
+            // Always leave the head SHA with a merge-policy-gate status once we
+            // have a PR — a never-posted required check would wedge the PR.
+            const postPolicy = async (state, description) => {
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha, context: 'merge-policy-gate', state,
+                description: String(description).slice(0, 140),
+              });
+            };
+            // Sticky comment upsert (same marker → updates in place). BEST-EFFORT:
+            // a comment failure must never break the gate, so errors are swallowed.
+            // Posted on the early "classifying" exits too, so a placeholder shows
+            // up immediately instead of nothing until blast + risk are done.
+            const marker = '<!-- merge-policy:v1 -->';
+            const upsertComment = async (commentBody) => {
+              try {
+                const full = commentBody.startsWith(marker) ? commentBody : `${marker}\n${commentBody}`;
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
+                const existing = comments.find((c) => c.body && c.body.startsWith(marker));
+                if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: full });
+                else await github.rest.issues.createComment({ owner, repo, issue_number: pr, body: full });
+              } catch (e) { core.warning(`sticky comment upsert failed (non-fatal): ${e.message}`); }
+            };
+            // Disarm any armed native auto-merge. Used on every NON-ready path —
+            // including the early exits below (classification pending/failed) —
+            // so a PR armed on a prior commit can't squash-merge before this run
+            // confirms it's still eligible. Throws if not enabled (the desired
+            // state), so we swallow.
+            const disarm = async () => {
+              try {
+                await github.graphql(
+                  `mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }`,
+                  { id: prData.node_id },
+                );
+                return true;
+              } catch (e) { return false; }
+            };
+
+            // ---- statuses for this EXACT head SHA (tier + AI gate are both SHA-pinned) ----
+            const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, { owner, repo, ref: sha, per_page: 100 });
+
+            // Tier comes from the SHA-pinned `blast-radius` status, NOT the
+            // `blast:N` label (which can lag a push). If blast-radius hasn't
+            // posted for this head SHA yet, set the gate pending and wait — it
+            // re-runs when blast-radius finishes via the workflow_run trigger.
+            // This closes the stale-label race AND avoids a never-posted gate.
+            const blast = statuses.find((s) => s.context === 'blast-radius');
+            if (!blast) {
+              await disarm();
+              await postPolicy('pending', 'waiting for blast-radius classification');
+              await upsertComment('### Merge policy\n⏳ **Classifying…** waiting on blast-radius + AI risk review. This comment updates automatically when they finish.');
+              core.info('No blast-radius status for this head SHA yet; disarmed + posted pending.');
+              return;
+            }
+            if (blast.state !== 'success') {
+              await disarm();
+              await postPolicy('failure', 'blast-radius classification did not succeed');
+              await upsertComment('### Merge policy\n❌ Blast-radius classification did not succeed — see the **blast-radius** check.');
+              core.info('blast-radius status not success; disarmed + set failure.');
+              return;
+            }
+            const tierMatch = /tier ([0-3])/.exec(blast.description || '');
+            if (!tierMatch) {
+              await disarm();
+              await postPolicy('failure', 'blast-radius status has no parseable tier');
+              await upsertComment('### Merge policy\n❌ Blast-radius status has no parseable tier — see the **blast-radius** check.');
+              return;
+            }
+            const tier = Number(tierMatch[1]);
+
+            // ---- AI gate state + risk (risk parsed from the status description) ----
+            const ai = statuses.find((s) => s.context === 'ai-review-gate'); // most-recent first
+            const aiGreen = !!ai && ai.state === 'success';
+            let risk = 'high';
+            const m = ai && /risk=(low|medium|high)/.exec(ai.description || '');
+            if (m) risk = m[1];
+
+            // ---- human approval state (track WHO approved, for codeowner identity) ----
+            const { data: reviews } = await github.rest.pulls.listReviews({ owner, repo, pull_number: pr, per_page: 100 });
+            const latest = {};
+            for (const r of reviews) {
+              if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) {
+                latest[r.user.id] = { state: r.state, login: r.user.login };
+              }
+            }
+            // GitHub blocks self-approval, but exclude the author explicitly so a
+            // self-review can never satisfy the human gate (defense in depth).
+            const author = (prData.user.login || '').toLowerCase();
+            const isAuthor = (login) => (login || '').toLowerCase() === author;
+            const changesRequested = Object.values(latest).some((v) => v.state === 'CHANGES_REQUESTED');
+            const approverLogins = Object.values(latest)
+              .filter((v) => v.state === 'APPROVED' && !isAuthor(v.login))
+              .map((v) => v.login);
+            const approved = approverLogins.length > 0 && !changesRequested;
+
+            const poVerified = labels.includes('po-verified');
+            // Force human review = the PR has an assignee. Assigning someone is
+            // the "a human should look at this" signal — the assignee list is
+            // our review queue. (Replaces the old force-human-review label /
+            // body checkbox.) NOTE: an auto-assigner that assigns every PR would
+            // make this always-on; see bot-auto-assign-pr.yml.
+            const forceReview = Array.isArray(prData.assignees) && prData.assignees.length > 0;
+            // Tier 3 routes to the ASSIGNEE (auto-assigned to the owner by
+            // bot-auto-assign-pr from .github/blast-radius/owners; anyone can
+            // reassign to handle OOO). That assignee — not just any reviewer —
+            // must approve. Falls back to the owner-identity check when the PR is
+            // somehow unassigned, so an unassigned Tier-3 PR still needs an owner.
+            const assigneeLogins = (prData.assignees || [])
+              .map((a) => (a.login || '').toLowerCase())
+              .filter((l) => l && l !== author);
+            const approverSet = new Set(approverLogins.map((l) => l.toLowerCase()));
+            const assigneeApproved = assigneeLogins.length > 0
+              && !changesRequested && assigneeLogins.some((a) => approverSet.has(a));
+            const allowedBases = (process.env.AUTOMERGE_BASES || 'develop')
+              .split(',').map((s) => s.trim()).filter(Boolean);
+            const baseOk = allowedBases.includes(prData.base.ref);
+
+            // ---- decision matrix ----
+            const requiredFor = (tier, risk) => {
+              if (tier === 0) return 'none';
+              if (tier === 1) return risk === 'high' ? 'approval' : 'none';
+              if (tier === 2) return risk === 'high' ? 'approval' : (risk === 'medium' ? 'po-verified' : 'none');
+              return 'codeowner';
+            };
+            let required = requiredFor(tier, risk);
+            if (forceReview && (required === 'none' || required === 'po-verified')) required = 'approval';
+
+            // ---- Owner identity (Tier 3): an actual OWNER of each changed owned
+            // path must have approved — not just any reviewer. Owners come from
+            // the `.github/blast-radius/owners` routing table (CODEOWNERS syntax,
+            // non-magic filename so GitHub doesn't auto-request reviewers), read
+            // from the TRUSTED base ref. Inlined (dependency-free) copy of
+            // .github/blast-radius/codeowners.ts — keep in parity. v1 matches by
+            // login (every Tier-3 path routes to an individual today). ----
+            const normalize = (o) => o.replace(/^@/, '').toLowerCase();
+            const parseCodeowners = (text) => {
+              const rules = [];
+              for (const raw of text.split('\n')) {
+                const line = raw.replace(/#.*$/, '').trim();
+                if (!line) continue;
+                const [pattern, ...owners] = line.split(/\s+/);
+                if (pattern && owners.length) rules.push({ pattern, owners });
+              }
+              return rules;
+            };
+            const patternToRegExp = (pattern) => {
+              const anchored = pattern.startsWith('/');
+              let p = anchored ? pattern.slice(1) : pattern;
+              if (p.endsWith('/')) p += '**';
+              let body = '';
+              for (let i = 0; i < p.length; i++) {
+                const c = p[i];
+                if (c === '*') {
+                  if (p[i + 1] === '*') { body += '.*'; i++; if (p[i + 1] === '/') i++; }
+                  else body += '[^/]*';
+                } else if ('.+?^${}()|[]\\'.includes(c)) { body += `\\${c}`; }
+                else { body += c; }
+              }
+              return new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`);
+            };
+            const ownersFor = (file, rules) => {
+              let owners = [];
+              for (const rule of rules) if (patternToRegExp(rule.pattern).test(file)) owners = rule.owners;
+              return owners;
+            };
+            // For a Tier-3 PR: read the owners file once and compute both the
+            // ordered list of owners across the changed files (the "preferred
+            // approvers" / code owners, shown in the sticky comment) and `met` —
+            // whether each owned file has an approval from one of its owners
+            // (the unassigned fallback gate).
+            const tier3OwnerInfo = async () => {
+              let text = '';
+              try {
+                const co = await github.rest.repos.getContent({ owner, repo, path: '.github/blast-radius/owners', ref: prData.base.ref });
+                text = Buffer.from(co.data.content, 'base64').toString('utf8');
+              } catch (e) {
+                core.info('blast-radius owners file unreadable on base ref; Tier-3 owner gate treated as unmet.');
+                return { ordered: [], met: false };
+              }
+              const rules = parseCodeowners(text);
+              const approvers = new Set(approverLogins.map(normalize));
+              const files = (await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: pr, per_page: 100 })).map((f) => f.filename);
+              const ordered = [];
+              let met = true;
+              for (const f of files) {
+                const owners = ownersFor(f, rules).map(normalize);
+                for (const o of owners) if (!o.includes('/') && !ordered.includes(o)) ordered.push(o);
+                if (owners.length && !owners.some((o) => approvers.has(o))) met = false;
+              }
+              return { ordered, met };
+            };
+            const tier3 = tier === 3 ? await tier3OwnerInfo() : null;
+
+            const humanOk =
+              required === 'none' ? true :
+              required === 'po-verified' ? (poVerified || approved) :
+              required === 'codeowner' ?
+                (assigneeLogins.length > 0 ? assigneeApproved : (approved && tier3.met)) :
+              /* approval */ approved;
+            const satisfied = aiGreen && humanOk;
+
+            const missing = [];
+            if (!aiGreen) missing.push('AI review');
+            if (!humanOk) {
+              if (required === 'po-verified') missing.push('PO verification');
+              else if (required === 'codeowner') missing.push(assigneeLogins.length > 0
+                ? `approval from the assigned owner (${assigneeLogins.join(', ')})`
+                : 'owner approval');
+              else missing.push('human approval');
+            }
+            const desc = (satisfied
+              ? `tier ${tier}, risk ${risk}: ready to merge`
+              : `tier ${tier}, risk ${risk}: needs ${missing.join(' + ')}`).slice(0, 140);
+
+            // `failure` only when the AI review concretely BLOCKED (blockers or
+            // an errored run). While we're merely waiting (AI still running, or a
+            // human/PO signal not yet present) use `pending` — both block the
+            // merge, but pending doesn't paint the PR red mid-review.
+            const aiBlocked = !!ai && (ai.state === 'failure' || ai.state === 'error');
+            const policyState = satisfied ? 'success' : (aiBlocked ? 'failure' : 'pending');
+
+            // ---- arm / disarm native auto-merge ----
+            // Arm ONLY for a satisfied, Tier-<3, develop-targeting PR. In EVERY
+            // other case (tier 3, wrong base, or unsatisfied) actively DISARM —
+            // a PRIOR commit may have armed auto-merge before this commit became
+            // tier 3 / unsatisfied, and GitHub's auto-merge persists across
+            // pushes. CRITICAL: disarm BEFORE posting the gate so a green
+            // merge-policy-gate can't race a still-armed auto-merge (which is
+            // exactly how a tier-3 PR could squash-merge automatically).
+            const shouldArm = satisfied && baseOk && tier < 3;
+            let automerge;
+            if (!shouldArm) {
+              const reason = tier >= 3 ? 'tier 3 — manual merge after assigned owner approval'
+                : !baseOk ? `base is ${prData.base.ref} — auto-merge only on ${allowedBases.join(', ')}`
+                : 'policy not satisfied';
+              const disarmed = await disarm();
+              automerge = disarmed ? `auto-merge disarmed (${reason})` : `not enabled (${reason})`;
+            }
+
+            await postPolicy(policyState, desc);
+
+            if (shouldArm) {
+              // Merge now if the PR is already satisfied. GitHub refuses to ARM
+              // native auto-merge on an already-mergeable PR ("clean/unstable
+              // status"), and merge-policy-gate is by design one of the LAST
+              // required checks to go green — so the common case is "ready now".
+              // pulls.merge still enforces every required check (it 405s if one
+              // is pending), so this can't merge an ungated PR; when it does 405,
+              // we arm auto-merge to wait for the lagging check instead.
+              try {
+                await github.rest.pulls.merge({
+                  owner, repo, pull_number: pr, sha, merge_method: 'squash',
+                });
+                automerge = 'merged (squash)';
+              } catch (mergeErr) {
+                try {
+                  await github.graphql(
+                    `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }`,
+                    { id: prData.node_id },
+                  );
+                  automerge = 'auto-merge armed (squash; waiting on a required check)';
+                } catch (armErr) {
+                  automerge = `not merged (${mergeErr.message}); not armed (${armErr.message})`;
+                  core.info(automerge);
+                }
+              }
+            }
+
+            // ---- sticky comment ---- (marker + upsertComment defined above)
+            const at = (logins) => logins.map((l) => `@${l}`).join(', ');
+            const reqText = {
+              none: 'no human review required',
+              'po-verified': 'PO verification on the preview (`po-verified` label)',
+              approval: '1 human approval',
+            }[required];
+
+            // Tier 3 routes review to the ASSIGNEE; the code owners (from
+            // .github/blast-radius/owners) are the preferred people to assign /
+            // approve. Spell that out, plus a Tier-3-aware human-status line.
+            const ownersList = tier3 && tier3.ordered.length ? at(tier3.ordered) : '';
+            let requiredLine;
+            const extraLines = [];
+            let humanLine;
+            if (required === 'codeowner') {
+              if (assigneeLogins.length > 0) {
+                requiredLine = `- Required: **approval from the assigned owner** (${at(assigneeLogins)}) ${assigneeApproved ? '✅' : '⏳'}`;
+                humanLine = assigneeApproved ? '✅ assigned owner approved'
+                  : (approved ? '☑️ approved by someone other than the assigned owner — the assigned owner still needs to approve' : '—');
+              } else {
+                requiredLine = '- Required: **owner review** (Tier 3) — no assigned owner yet; assign a code owner below, then they approve';
+                humanLine = (approved && tier3.met)
+                  ? (ownersList ? '✅ code owner approved' : '✅ approved (no code owner mapped for these files)')
+                  : (approved ? '☑️ approved, but not by a code owner' : '—');
+              }
+              extraLines.push(`- Preferred approvers (code owners): ${ownersList || '_none mapped for these files_'}`);
+            } else if (required === 'po-verified') {
+              // Medium-risk Tier 2: either path clears it (no assignee here — an
+              // assignee would have bumped this to 'approval'). Spell out both.
+              requiredLine = '- Required: **PO sign-off _or_ 1 approval** (medium-risk Tier 2)';
+              extraLines.push('- Clear it **either** way: ✅ verify the deploy preview, then comment **`/po-verified`** (or add the `po-verified` label) — **or** get 1 human approval.');
+              extraLines.push('- Want someone to review your code? **Add them as an assignee** — that makes their approval required before merge.');
+              humanLine = approved ? '✅ approved' : (poVerified ? '✅ `po-verified` label set' : '— neither yet');
+            } else {
+              requiredLine = `- Required: **${reqText}**${forceReview ? ' _(assignee present → human review)_' : ''}`;
+              humanLine = approved ? '✅ approved' : (poVerified ? '✅ po-verified' : '—');
+              // Auto-merge-eligible Tier 1/2 (no mandatory review): tell the author
+              // how to opt into a code review if they want one.
+              if ((tier === 1 || tier === 2) && required === 'none' && !forceReview) {
+                extraLines.push('- Want someone to review your code? **Add them as an assignee** — that makes their approval required before merge.');
+              }
+            }
+
+            const body = [
+              marker,
+              `### Merge policy — Tier ${tier}, risk ${risk}`,
+              '',
+              requiredLine,
+              ...extraLines,
+              `- AI review: ${aiGreen ? '✅ green' : '❌ blocked / pending'}`,
+              `- Human: ${humanLine}`,
+              `- Status: ${satisfied ? '✅ **ready**' : `⏳ needs ${missing.join(' + ') || '—'}`}`,
+              `- Auto-merge: ${automerge}`,
+              '',
+              '<sub>Recomputed on pushes, reviews, label changes, and after the AI review finishes.</sub>',
+            ].join('\n');
+            await upsertComment(body);

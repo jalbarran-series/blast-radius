@@ -1,0 +1,26 @@
+# Tier-3 owner routing for the blast-radius merge automation.
+#
+# CODEOWNERS *syntax*, but DELIBERATELY NOT the magic `CODEOWNERS` filename — so
+# GitHub does NOT auto-request these owners as reviewers. The bots resolve
+# ownership from here: auto-assign assigns the Tier-3 owner; merge-policy requires
+# the assignee's approval (falls back to any owner on the matched line when
+# unassigned). Any ONE listed owner's approval satisfies the gate.
+#
+# RULES:
+#   - Every entry MUST classify Tier 3 under config.yml (config.validate.test.ts
+#     enforces this — an owner on a lower-tier path is an "orphan" and fails CI).
+#   - List owners in priority order: `path @primary @backup` (OOO-aware).
+#   - LAST-MATCH-WINS — list narrower sensitive paths after broader ones.
+#
+# >>> SCAFFOLDED STARTER — REPLACE @your-team WITH REAL HANDLES. <<<
+
+# --- DevEx: the automation + CI that grades every PR (self-protecting) ---
+/.github/workflows/        @your-team
+/.github/blast-radius/     @your-team
+/.github/prompts/          @your-team
+/CODEOWNERS                @your-team
+
+# --- EDIT: route your repo's Tier-3 paths to their owners ---
+/src/auth/**               @your-team
+/migrations/**             @your-team
+/packages/*/src/index.ts   @your-team

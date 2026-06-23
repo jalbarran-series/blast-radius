@@ -1,0 +1,10 @@
+{
+  "name": "blast-radius",
+  "description": "Tiered PR merge policy for AI-authored code: a deterministic blast-radius classifier, bot workflows, and an agent skill, installable into any repo.",
+  "version": "0.1.0",
+  "author": {
+    "name": "drekki"
+  },
+  "repository": "https://github.com/drekki/blast-radius",
+  "skills": "./.claude/skills/"
+}

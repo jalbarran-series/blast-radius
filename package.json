@@ -1,0 +1,44 @@
+{
+  "name": "@drekki/blast-radius",
+  "version": "0.1.0",
+  "description": "Blast-radius tiered PR merge policy for AI-authored code — a deterministic classifier, bot workflows, and an agent skill, installable into any repo.",
+  "keywords": [
+    "pr",
+    "code-review",
+    "merge-policy",
+    "blast-radius",
+    "ai",
+    "agents",
+    "skills",
+    "github-actions",
+    "ci-cd"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "blast-radius": "cli/bin/cli.js"
+  },
+  "main": "./engine/classify.ts",
+  "files": [
+    "engine/",
+    "cli/",
+    "templates/",
+    "skill/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run engine",
+    "build:skills": "node scripts/build-skills.mjs",
+    "init": "node cli/bin/cli.js init",
+    "doctor": "node cli/bin/cli.js doctor"
+  },
+  "dependencies": {
+    "minimatch": "9.0.5",
+    "yaml": "2.5.1"
+  },
+  "devDependencies": {
+    "tsx": "4.19.2",
+    "vitest": "2.1.8"
+  }
+}

@@ -1,0 +1,299 @@
+# >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
+# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
+# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
+# merge-policy-gate status is required. Ported from series-ai/venus.
+
+name: "Bot: auto-assign PR reviewer (tier-aware)"
+
+# Runs AFTER blast-radius classifies (workflow_run) and assigns the reviewer
+# whose approval the merge-policy gate will require:
+#   Tier 3 -> an OWNER of the changed paths, from the .github/blast-radius/owners
+#             routing table (CODEOWNERS syntax, non-magic filename so GitHub
+#             doesn't ALSO auto-request these owners as reviewers). OOO-aware:
+#             drop any owner that is paused in AUTOASSIGN_POOL (or is the author),
+#             then LOAD-BALANCE across the remaining eligible owners on the line
+#             (least 24h assigned-PR load; a GitHub suggested reviewer breaks a
+#             load tie) so blast:3 PRs spread instead of always hitting the
+#             first-listed owner. Any one owner's approval clears the gate, so the
+#             pick is free to balance. If every owner is out/author, fall back to
+#             the load-balanced pool.
+#   Tier 1/2 @ HIGH risk -> a load-balanced pool member. These are exactly the
+#             cases the merge policy requires an approval for, so we queue a
+#             reviewer (any human approval clears it — the assignee is a hint).
+#   Tier 2 @ medium -> NO auto-assignment: keeps the po-verified-or-approval
+#             shortcut (assigning would force an approval, removing po-verified).
+#   Tier 2 @ low, Tier 1 @ low/med, Tier 0 -> no assignment (auto-merge / inert).
+# Tier 1/2 need the AI risk verdict, so this runs after BOTH "Bot: Blast Radius"
+# and "Bot: AI Review (Opus)" complete (whichever lands last re-evaluates).
+# An existing/manual assignee is left as-is, with ONE exception: a Tier-3 PR
+# whose assignee is not an owner is reassigned to the owner (closes the
+# Tier-2 -> Tier-3 escalation hole where a load-balanced non-owner would gate a
+# Tier-3 PR). Reassigning to a backup OWNER for OOO is preserved; the gate then
+# requires that assignee.
+#
+# Disabled unless repo variable AUTOASSIGN_ENABLED=true. NOTE: because this is a
+# workflow_run trigger, it only fires once the workflow lives on the default
+# branch (same constraint as bot-merge-policy).
+
+on:
+  workflow_run:
+    # Both: blast-radius gives the tier; ai-review gives the risk (needed to
+    # decide Tier-1/2 high-risk). Whichever finishes last re-evaluates.
+    workflows: ["Bot: Blast Radius", "Bot: AI Review (Opus)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write # addAssignees / issues.update (Tier-3 reassign) use the issues API
+  statuses: read # read the SHA-pinned blast-radius tier + ai-review risk
+
+concurrency:
+  group: auto-assign-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  assign:
+    if: ${{ vars.AUTOASSIGN_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign reviewer by tier
+        uses: actions/github-script@v7
+        env:
+          # Pool + OOO source. JSON array of {login, pausedUntil?, reason?}.
+          # An owner paused (pausedUntil >= today) is skipped to the next owner
+          # on the CODEOWNERS line; the same pool drives Tier-2 load balancing.
+          POOL_CFG: ${{ vars.AUTOASSIGN_POOL }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            // ---- resolve PR from the workflow_run event ----
+            const wr = context.payload.workflow_run;
+            let pr;
+            if (wr.pull_requests && wr.pull_requests.length) {
+              pr = wr.pull_requests[0].number;
+            } else {
+              const headLabel = `${wr.head_repository.owner.login}:${wr.head_branch}`;
+              const list = await github.rest.pulls.list({ owner, repo, state: 'open', head: headLabel });
+              if (list.data.length) pr = list.data[0].number;
+            }
+            if (!pr) { core.info('No PR resolved for this event; nothing to do.'); return; }
+            const prNum = pr;
+
+            const { data: prData } = await github.rest.pulls.get({ owner, repo, pull_number: prNum });
+            if (prData.state !== 'open' || prData.draft) { core.info(`PR #${prNum} not open / draft; skipping.`); return; }
+
+            const author = (prData.user.login || '').toLowerCase();
+            const isAuthor = (l) => (l || '').toLowerCase() === author;
+            // Existing assignees (lowercased). Normally left untouched — reassigning
+            // is the human OOO/redirect mechanism — with ONE exception handled after
+            // tier + owner resolution: a Tier-3 PR whose assignee is not an owner.
+            const existing = (prData.assignees || []).map((a) => (a.login || '').toLowerCase()).filter(Boolean);
+
+            // ---- author overrides (bot fleets route to a fixed owner) — only when
+            // UNASSIGNED; an existing assignee is handled below. ----
+            const AUTHOR_OVERRIDES = {};
+            const override = AUTHOR_OVERRIDES[author];
+            if (!existing.length && override) {
+              await github.rest.issues.addAssignees({ owner, repo, issue_number: prNum, assignees: [override] });
+              core.info(`Override: assigned #${prNum} (author ${prData.user.login}) to ${override}.`);
+              return;
+            }
+
+            // ---- tier from the SHA-pinned blast-radius status ----
+            const sha = prData.head.sha;
+            const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, { owner, repo, ref: sha, per_page: 100 });
+            const blast = statuses.find((s) => s.context === 'blast-radius');
+            if (!blast || blast.state !== 'success') { core.info('No successful blast-radius status for this SHA; skipping.'); return; }
+            const tierMatch = /tier ([0-3])/.exec(blast.description || '');
+            if (!tierMatch) { core.info('blast-radius status has no parseable tier; skipping.'); return; }
+            const tier = Number(tierMatch[1]);
+            if (tier === 0) { core.info('Tier 0: no assignment (inert / auto-merge).'); return; }
+
+            // Auto-assign a reviewer exactly when the merge policy will REQUIRE an
+            // approval — because an assignee IS the force-human-review signal, so
+            // assigning == requiring an approval. That set is: Tier 3 (the owner) +
+            // Tier 1/2 at HIGH risk. Tier 2 medium keeps its po-verified-or-approval
+            // shortcut (not assigned); Tier 1/2 low auto-merge. Tier 1/2 need the AI
+            // risk verdict; require ai-review-gate GREEN (so risk is final — avoids
+            // the pending-window race). If it isn't green yet, skip — this re-fires
+            // when "Bot: AI Review (Opus)" completes.
+            // Tier 3 falls through to owner assignment (risk-independent). Tier 1/2
+            // are assigned ONLY at high risk (the policy's 'approval' cases).
+            if (tier !== 3) {
+              const ai = statuses.find((s) => s.context === 'ai-review-gate');
+              if (!ai || ai.state !== 'success') { core.info('AI review not green yet; will re-evaluate when it completes.'); return; }
+              const rm = /risk=(low|medium|high)/.exec(ai.description || '');
+              const risk = rm ? rm[1] : 'high';
+              const required = tier === 1
+                ? (risk === 'high' ? 'approval' : 'none')
+                : (risk === 'high' ? 'approval' : (risk === 'medium' ? 'po-verified' : 'none'));
+              if (required !== 'approval') { core.info(`Tier ${tier}, risk ${risk}: no auto-assignment (policy requires: ${required}).`); return; }
+            }
+
+            // ---- pool + OOO from AUTOASSIGN_POOL ----
+            const FALLBACK_POOL = ['TODO-reviewer-1', 'TODO-reviewer-2'];
+            const today = new Date().toISOString().slice(0, 10);
+            let poolCfg = [];
+            try { poolCfg = JSON.parse(process.env.POOL_CFG || '[]'); } catch (e) { core.warning(`AUTOASSIGN_POOL parse failed: ${e.message}.`); }
+            const isPaused = (login) => Array.isArray(poolCfg) && poolCfg.some((e) =>
+              e.login && e.login.toLowerCase() === (login || '').toLowerCase() && e.pausedUntil && e.pausedUntil >= today);
+            let POOL = (Array.isArray(poolCfg) && poolCfg.length)
+              ? poolCfg.filter((e) => !e.pausedUntil || e.pausedUntil < today).map((e) => e.login).filter(Boolean)
+              : FALLBACK_POOL;
+            if (!POOL.length) POOL = FALLBACK_POOL;
+
+            // ---- load-balanced pick over a candidate list. Used for Tier 2 (the
+            // whole pool), AND for Tier 3 (the eligible owners on the matched
+            // line) so blast:3 PRs spread across owners instead of always landing
+            // on whoever is listed first. Load = sum over the candidate's open
+            // PRs assigned in the last 24h of (BASE_COST + capped changed-files).
+            // `tieBreak(cands)` picks among equal-min-load candidates (Tier 3
+            // passes the GitHub suggested-reviewer preference); round-robin when
+            // it returns null or load lookup fails. ----
+            const SIZE_CAP = 50, BASE_COST = 15, WINDOW_HOURS = 24;
+            const loadBalancedPick = async (rawCandidates, tieBreak) => {
+              const candidates = rawCandidates.filter((c) => !isAuthor(c));
+              if (!candidates.length) return null;
+              if (candidates.length === 1) return candidates[0];
+              // tieBreak(cands), if given, returns a member of `cands` or a falsy
+              // value (→ deterministic round-robin). Never a non-candidate.
+              const breakTie = (cands) => (tieBreak && tieBreak(cands)) || cands[prNum % cands.length];
+              const since = new Date(Date.now() - WINDOW_HOURS * 3600 * 1000).toISOString();
+              const loads = {};
+              try {
+                for (const cand of candidates) {
+                  const { data } = await github.rest.search.issuesAndPullRequests({
+                    q: `repo:${owner}/${repo} is:pr assignee:${cand} created:>=${since}`, per_page: 50,
+                  });
+                  let load = 0;
+                  for (const item of data.items) {
+                    if (item.number === prNum) continue;
+                    const detail = await github.rest.pulls.get({ owner, repo, pull_number: item.number });
+                    load += BASE_COST + Math.min(detail.data.changed_files || 0, SIZE_CAP);
+                  }
+                  loads[cand] = load;
+                }
+              } catch (e) {
+                // A rate-limit / transient API error must NOT abort assignment —
+                // fall back to deterministic round-robin over the candidates. No
+                // suggested-reviewer preference here: that only breaks a genuine
+                // equal-load tie, and with load unknown it would just re-concentrate.
+                core.warning(`Load lookup failed (${e.message}); using round-robin fallback.`);
+                return candidates[prNum % candidates.length];
+              }
+              const minLoad = Math.min(...Object.values(loads));
+              const tied = candidates.filter((c) => loads[c] === minLoad);
+              return breakTie(tied);
+            };
+
+            // ---- GitHub's blame-derived suggested reviewers (GraphQL-only).
+            // Used ONLY as a Tier-3 tie-break among equal-load owners — preferring
+            // an owner GitHub also suggests adds relevance without re-concentrating
+            // load (load stays the primary key). Empty/failed → no preference. ----
+            const suggestedReviewerSet = async () => {
+              try {
+                const q = `query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$num){suggestedReviewers{reviewer{login}}}}}`;
+                const r = await github.graphql(q, { owner, repo, num: prNum });
+                const logins = (r.repository.pullRequest.suggestedReviewers || [])
+                  .map((s) => s.reviewer && s.reviewer.login).filter(Boolean).map((l) => l.toLowerCase());
+                return new Set(logins);
+              } catch (e) {
+                core.info(`suggestedReviewers lookup failed (${e.message}); load-only tie-break.`);
+                return new Set();
+              }
+            };
+
+            // ---- Tier-3 owner routing from .github/blast-radius/owners (read from
+            // the TRUSTED base ref). Inlined parser — keep in parity with
+            // .github/blast-radius/codeowners.ts (tier3Assignee) and the gate.
+            // Produces orderedOwners (to test whether an existing assignee owns a
+            // changed path) and eligibleOwners (non-author, non-paused — the set
+            // the owner pick load-balances across). ----
+            const orderedOwners = [];
+            let eligibleOwners = [];
+            let ownerPick = null;
+            if (tier === 3) {
+              const normalize = (o) => o.replace(/^@/, '').toLowerCase();
+              const parseCodeowners = (text) => {
+                const rules = [];
+                for (const raw of text.split('\n')) {
+                  const line = raw.replace(/#.*$/, '').trim();
+                  if (!line) continue;
+                  const [pattern, ...owners] = line.split(/\s+/);
+                  if (pattern && owners.length) rules.push({ pattern, owners });
+                }
+                return rules;
+              };
+              const patternToRegExp = (pattern) => {
+                const anchored = pattern.startsWith('/');
+                let p = anchored ? pattern.slice(1) : pattern;
+                if (p.endsWith('/')) p += '**';
+                let body = '';
+                for (let i = 0; i < p.length; i++) {
+                  const c = p[i];
+                  if (c === '*') {
+                    if (p[i + 1] === '*') { body += '.*'; i++; if (p[i + 1] === '/') i++; }
+                    else body += '[^/]*';
+                  } else if ('.+?^${}()|[]\\'.includes(c)) { body += `\\${c}`; }
+                  else { body += c; }
+                }
+                return new RegExp(`^${anchored ? '' : '(?:.*/)?'}${body}$`);
+              };
+              const ownersFor = (file, rules) => {
+                let owners = [];
+                for (const rule of rules) if (patternToRegExp(rule.pattern).test(file)) owners = rule.owners;
+                return owners;
+              };
+              try {
+                const co = await github.rest.repos.getContent({ owner, repo, path: '.github/blast-radius/owners', ref: prData.base.ref });
+                const rules = parseCodeowners(Buffer.from(co.data.content, 'base64').toString('utf8'));
+                const files = (await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: prNum, per_page: 100 })).map((f) => f.filename);
+                for (const f of files) for (const o of ownersFor(f, rules)) {
+                  const n = normalize(o);
+                  if (n.includes('/')) continue; // team token — login-only resolution; skip to others
+                  if (!orderedOwners.includes(n)) orderedOwners.push(n);
+                }
+                eligibleOwners = orderedOwners.filter((o) => o !== author && !isPaused(o));
+                core.info(`Tier 3 owners (in order): [${orderedOwners.join(', ')}]; eligible (non-author/OOO): [${eligibleOwners.join(', ')}].`);
+              } catch (e) {
+                core.info(`owners lookup failed (${e.message}); using load-balanced fallback.`);
+              }
+              // Load-balance the owner across the eligible set so blast:3 PRs
+              // don't all land on the first-listed owner; prefer a GitHub
+              // suggested reviewer only to break a load tie. null here (no
+              // eligible owner — all author/OOO) → full-pool fallback below.
+              if (eligibleOwners.length) {
+                const suggested = eligibleOwners.length > 1 ? await suggestedReviewerSet() : new Set();
+                const preferSuggested = (cands) => cands.find((c) => suggested.has(c)) || null;
+                ownerPick = await loadBalancedPick(eligibleOwners, preferSuggested);
+              }
+              core.info(`Tier 3 owner pick: ${ownerPick || 'none available'}.`);
+            }
+
+            // ---- existing assignee (only reached for Tier 3): leave as-is,
+            // EXCEPT when the assignee is not an owner — reassign to the owner.
+            // Closes the escalation hole where a non-owner assignee carried over
+            // from a lower tier (e.g. a manual "extra eyes" reviewer on a Tier-2
+            // PR that was later raised to Tier 3) would otherwise gate it. A
+            // deliberate OOO redirect to a backup OWNER is preserved
+            // (assigneeIsOwner == true); when no owner target exists (all owners
+            // author/OOO) we leave the assignee as-is. ----
+            if (existing.length) {
+              const assigneeIsOwner = existing.some((a) => orderedOwners.includes(a));
+              if (ownerPick && !assigneeIsOwner) {
+                await github.rest.issues.update({ owner, repo, issue_number: prNum, assignees: [ownerPick] });
+                core.info(`Tier-3 reassign: assignee(s) [${existing.join(', ')}] not an owner → set to ${ownerPick}.`);
+                return;
+              }
+              core.info(`PR #${prNum} already assigned (${existing.join(', ')}); leaving as-is.`);
+              return;
+            }
+
+            // ---- no existing assignee: pick the Tier-3 owner (load-balanced
+            // fallback only when every owner is the author / OOO) ----
+            const pick = ownerPick || await loadBalancedPick(POOL);
+            if (!pick) { core.warning('No eligible assignee found; leaving unassigned.'); return; }
+            await github.rest.issues.addAssignees({ owner, repo, issue_number: prNum, assignees: [pick] });
+            core.info(`Tier ${tier}: assigned PR #${prNum} to ${pick}.`);

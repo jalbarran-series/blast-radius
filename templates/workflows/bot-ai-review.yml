@@ -1,0 +1,259 @@
+# >>> SCAFFOLDED BY blast-radius init — ADAPT BEFORE ENABLING <<<
+# Set repo secrets (ANTHROPIC_API_KEY for ai-review), fill the reviewer pool /
+# AUTHOR_OVERRIDES in auto-assign, and configure branch rulesets so the
+# merge-policy-gate status is required. Ported from series-ai/venus.
+
+name: "Bot: AI Review (Opus)"
+
+# Mandatory pre-merge AI review. Runs Opus over the diff and posts the
+# `ai-review-gate` commit status: red while the review reports any blocker.
+# Tier-0 (inert) PRs skip Opus and auto-pass. The blast tier is computed
+# in-workflow (not read from the label) so a stale label can't skip Opus.
+
+on:
+  # INVARIANT: the Opus verdict is a function of the CODE (the diff at a SHA),
+  # not the tier or labels. A flag label/`Flag:` body change only moves a PR
+  # between tier 2 and tier 1 (flag-cap) — it never changes whether Opus runs
+  # (both tiers run it) and never invalidates the verdict. So we deliberately do
+  # NOT trigger on labeled/unlabeled/edited/assigned: that would force a full
+  # Opus re-run (cost + latency) on every po-verified label or assignee change
+  # for no safety gain. blast-radius handles the tier refresh; merge-policy reuses this
+  # SHA-pinned verdict with the refreshed tier.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number (used by the open-PR backfill)"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+env:
+  # Override via repo variable AI_REVIEW_MODEL. Default is the latest Opus the
+  # pinned @mariozechner/pi-coding-agent@0.70.0 registry actually has
+  # (claude-opus-4-8 is NOT in that registry — it would error). Bump this AND
+  # the pi-coding-agent pin together when a newer Opus lands in the catalog.
+  AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'anthropic/claude-opus-4-7' }}
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NUM="${{ github.event.pull_request.number || inputs.pr }}"
+          read -r HEAD BASE < <(gh pr view "$NUM" --repo "$REPO" \
+            --json headRefOid,baseRefName --jq '"\(.headRefOid) \(.baseRefName)"')
+          {
+            echo "num=$NUM"
+            echo "head=$HEAD"
+            echo "base=$BASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Use base-ref classifier + review prompt (prevent self-downgrade)
+        env:
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          # Trusted base-ref classifier + config AND the Opus review prompt — a
+          # PR must not be able to weaken the rules OR the reviewer's
+          # instructions that grade it. (.github/prompts is also self-protected
+          # in classify.ts / config.yml / CODEOWNERS as defense in depth.)
+          git fetch --no-tags origin "$BASE" || true
+          if git checkout "origin/$BASE" -- .github/blast-radius 2>/dev/null; then
+            echo "Using base-ref classifier from origin/$BASE"
+          else
+            echo "Base has no .github/blast-radius yet (bootstrap); using PR-head copy"
+          fi
+          if git checkout "origin/$BASE" -- .github/prompts 2>/dev/null; then
+            echo "Using base-ref review prompt from origin/$BASE"
+          else
+            echo "Base has no .github/prompts yet (bootstrap); using PR-head copy"
+          fi
+
+      - name: Install classifier deps
+        working-directory: .github/blast-radius
+        run: npm ci
+
+      - name: Compute blast tier (Tier 0 skips Opus)
+        id: tier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.num }}
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE" || true
+          gh pr diff "$PR" --repo "$REPO" --name-only > /tmp/files.txt
+          gh pr diff "$PR" --repo "$REPO" > /tmp/diff.txt
+          # Pre-fetch PR metadata here (this step holds the token) so the Opus
+          # step needs no GitHub access of its own.
+          gh pr view "$PR" --repo "$REPO" --json title,body,files > /tmp/prmeta.json
+          FLAG=$(gh pr view "$PR" --repo "$REPO" --json labels,body --jq '
+            ([.labels[].name | select(startswith("flag:")) | sub("flag:";"")]
+             + [ (.body // "") | capture("(?im)^Flag:\\s*(?<n>[A-Z0-9_]+)").n ])
+            | map(select(. != null and . != "")) | .[0] // ""' 2>/dev/null || echo "")
+          T=$(npx --prefix .github/blast-radius tsx .github/blast-radius/runClassify.ts \
+            --files /tmp/files.txt --diff /tmp/diff.txt --flag "$FLAG" \
+            --base "origin/$BASE" | jq -r .tier)
+          echo "tier=$T" >> "$GITHUB_OUTPUT"
+
+      - name: Invalidate any prior verdict (reset gate to pending before re-review)
+        # When Opus genuinely re-runs on the SAME head SHA (reopened,
+        # workflow_dispatch backfill), reset the gate first so a prior `success`
+        # can't keep auto-merge armed while the new run is in flight. Opus is
+        # non-deterministic, so the latest run's verdict — not a stale lenient
+        # one — must gate. (We do NOT re-run on label/body changes; see the
+        # `on:` note.) The publish step (always()) re-posts success/failure.
+        if: ${{ steps.tier.outputs.tier != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head }}" \
+            -f state=pending -f context=ai-review-gate -f description="review in progress"
+
+      - name: Tier-0 short-circuit (skip Opus)
+        if: ${{ steps.tier.outputs.tier == '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head }}" \
+            -f state=success -f context=ai-review-gate -f description="tier 0 (inert) — Opus skipped"
+
+      - name: Build review prompt
+        if: ${{ steps.tier.outputs.tier != '0' }}
+        run: |
+          {
+            echo "REVIEW_PROMPT<<__PIEOF__"
+            echo "REPO: ${{ github.repository }}"
+            echo "PR: ${{ steps.pr.outputs.num }}"
+            echo ""
+            cat .github/prompts/ai-review.md
+            echo "__PIEOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Prepare Pi output dir
+        if: ${{ steps.tier.outputs.tier != '0' }}
+        id: prdir
+        run: |
+          mkdir -p "$RUNNER_TEMP/ai-review"
+          echo "dir=$RUNNER_TEMP/ai-review" >> "$GITHUB_OUTPUT"
+
+      - name: Harden — strip git push credential before the untrusted Opus step
+        if: ${{ steps.tier.outputs.tier != '0' }}
+        run: |
+          # The Opus step reviews attacker-controlled diff/tree. We already
+          # withhold GH_TOKEN from it; also remove the persisted git credential
+          # so a prompt-injected agent cannot `git push`. (We keep the
+          # credential through the base-ref fetch above, then drop it here.)
+          git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+
+      - name: Review with Pi (Opus)
+        if: ${{ steps.tier.outputs.tier != '0' }}
+        uses: ./.github/actions/pi-agent
+        with:
+          model: ${{ env.AI_REVIEW_MODEL }}
+          prompt-text: ${{ env.REVIEW_PROMPT }}
+          pr-output-dir: ${{ steps.prdir.outputs.dir }}
+          log-mode: progress
+        # Deliberately NO GH_TOKEN: Opus reviews attacker-controlled input
+        # (diff/tree). It reads the pre-fetched /tmp/diff.txt, /tmp/files.txt,
+        # /tmp/prmeta.json and the checked-out tree — no GitHub access. Worst
+        # case for a prompt-injected diff is a lenient verdict, not a forged
+        # gate or merge.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Publish ai-review-gate status
+        # always() so a crashed/timed-out Opus run still posts a status — a
+        # never-posted required check would block the PR forever.
+        if: ${{ always() && steps.tier.outputs.tier != '0' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const sha = '${{ steps.pr.outputs.head }}';
+            const pr = Number('${{ steps.pr.outputs.num }}');
+            const { owner, repo } = context.repo;
+
+            const postError = async (description) => {
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha, context: 'ai-review-gate', state: 'error',
+                description: description.slice(0, 140),
+              });
+              core.setFailed(description);
+            };
+
+            let review;
+            try {
+              review = JSON.parse(fs.readFileSync('ai-review.json', 'utf8'));
+            } catch (e) {
+              return postError('Opus produced no/invalid ai-review.json (run may have failed or timed out)');
+            }
+            // Reject valid-but-degenerate output: a model that omits `blockers`
+            // or `risk` must NOT pass silently as "no blockers".
+            if (!Array.isArray(review.blockers) || !['low', 'medium', 'high'].includes(review.risk)) {
+              return postError('ai-review.json missing required `blockers` (array) or `risk` (low|medium|high)');
+            }
+            const blockers = review.blockers;
+            const risk = review.risk;
+            const state = blockers.length === 0 ? 'success' : 'failure';
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha, context: 'ai-review-gate', state,
+              description: `${blockers.length} blocker(s), risk=${risk}`.slice(0, 140),
+            });
+
+            const marker = '<!-- ai-review:v1 -->';
+            const list = blockers.length
+              ? blockers.map((b) => `- ${b}`).join('\n')
+              : '_No blockers found._';
+            const body = [
+              marker,
+              `### AI review (${process.env.AI_REVIEW_MODEL}) — risk: **${risk}**`,
+              '',
+              blockers.length ? '**Blockers (must be resolved before merge):**' : '✅ No blockers.',
+              list,
+              '',
+              review.summary ? `> ${review.summary}` : '',
+              '<sub>Re-runs on every push. `ai-review-gate` is red while any blocker remains.</sub>',
+            ].join('\n');
+            // Delete-and-repost (NOT update-in-place): an in-place edit keeps the
+            // comment anchored at its original timeline position, where GitHub's
+            // "Load more…" collapse buries it on busy PRs and reviewers never see
+            // the fresh verdict. Reposting puts each review at the BOTTOM of the
+            // timeline. AI review only re-runs on pushes, so the notification
+            // cost is one comment per push (vs merge-policy/blast-radius, which
+            // recompute constantly and stay as in-place upserts).
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
+            for (const c of comments.filter((c) => c.body && c.body.startsWith(marker))) {
+              try { await github.rest.issues.deleteComment({ owner, repo, comment_id: c.id }); } catch (e) { /* already gone */ }
+            }
+            await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
+        env:
+          AI_REVIEW_MODEL: ${{ env.AI_REVIEW_MODEL }}
