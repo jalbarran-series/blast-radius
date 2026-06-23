@@ -1,6 +1,6 @@
 {
   "name": "@series-inc/blast-radius",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Blast-radius tiered PR merge policy for AI-authored code — a deterministic classifier, bot workflows, and an agent skill, installable into any repo.",
   "keywords": [
     "pr",
