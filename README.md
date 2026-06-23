@@ -8,6 +8,15 @@ workflows, and an agent skill, installable into any repo.
 > Origin: extracted from a production PR merge-policy system and generalized so
 > any repo can adopt it with one command.
 
+## Contents
+
+- [Why](#why)
+- [Install into a repo](#install-into-a-repo)
+- [CLI](#cli)
+- [The tiers](#the-tiers)
+- [Workflow secrets & variables](#workflow-secrets--variables)
+- [Layout](#layout)
+
 ## Why
 
 AI lets non-engineers open multiple 4k-line PRs a day. Gating on line count makes
@@ -40,8 +49,32 @@ judgment (which paths are Tier 3 in *this* repo).
 | `.github/PULL_REQUEST_TEMPLATE.md` | your repo | no |
 | `.claude/`, `.cursor/`, `.agents/skills/blast-radius/` | framework | yes |
 
-Then: edit `config.yml` tiers + `owners` for your paths, configure the secrets +
-variables below, and enable the workflows.
+Then: edit `config.yml` tiers + `owners` for your paths, set the
+[secrets + variables](#workflow-secrets--variables), and enable the workflows.
+
+## CLI
+
+```bash
+npx @series-inc/blast-radius install [dir]       # scaffold engine + workflows + starter config + skill
+npx @series-inc/blast-radius update  [dir]       # pull latest framework files; surface workflow drift
+npx @series-inc/blast-radius doctor  [dir]       # validate config.yml + owners (no orphan owners)
+npx @series-inc/blast-radius classify <file>...  # print the tier for a set of changed files
+```
+
+`update` refreshes the framework-owned files in place (compiled engine + the
+`/blast-radius` skill) and, for the vendored workflows + PR template, writes a
+non-destructive `<file>.new` next to any file that drifted from the current
+template — diff, merge what you want, then delete the `.new`. It never touches
+your `config.yml`, `owners`, or `config.validate.test.ts`.
+
+Agent commands (from the installed skill): `/blast-radius init`, `/blast-radius explain`.
+
+## The tiers
+
+- **Tier 0 — inert** (docs, assets, add-only). Auto-merges, no review.
+- **Tier 1 — flag-dark** (new code behind a default-off flag). AI review only.
+- **Tier 2 — shared code** (normal product code). AI review + human only if risky.
+- **Tier 3 — high blast** (auth, secrets, migrations, CI, public APIs). Owner approval.
 
 ## Workflow secrets & variables
 
@@ -78,30 +111,6 @@ Fastest path to a working AI-review gate:
 ```bash
 gh secret set ANTHROPIC_API_KEY --body "sk-ant-..."
 ```
-
-## CLI
-
-```bash
-npx @series-inc/blast-radius install [dir]       # scaffold engine + workflows + starter config + skill
-npx @series-inc/blast-radius update  [dir]       # pull latest framework files; surface workflow drift
-npx @series-inc/blast-radius doctor  [dir]       # validate config.yml + owners (no orphan owners)
-npx @series-inc/blast-radius classify <file>...  # print the tier for a set of changed files
-```
-
-`update` refreshes the framework-owned files in place (compiled engine + the
-`/blast-radius` skill) and, for the vendored workflows + PR template, writes a
-non-destructive `<file>.new` next to any file that drifted from the current
-template — diff, merge what you want, then delete the `.new`. It never touches
-your `config.yml`, `owners`, or `config.validate.test.ts`.
-
-Agent commands (from the installed skill): `/blast-radius init`, `/blast-radius explain`.
-
-## The tiers
-
-- **Tier 0 — inert** (docs, assets, add-only). Auto-merges, no review.
-- **Tier 1 — flag-dark** (new code behind a default-off flag). AI review only.
-- **Tier 2 — shared code** (normal product code). AI review + human only if risky.
-- **Tier 3 — high blast** (auth, secrets, migrations, CI, public APIs). Owner approval.
 
 ## Layout
 
