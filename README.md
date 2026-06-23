@@ -5,8 +5,8 @@ Tiered PR merge policy for AI-authored code. Classify every PR by **blast radius
 the risky 5% to an accountable owner. Ships a deterministic classifier, GitHub bot
 workflows, and an agent skill, installable into any repo.
 
-> Origin: extracted from the blast-radius system in series-ai/venus, generalized
-> so any repo can adopt it with one command.
+> Origin: extracted from a production PR merge-policy system and generalized so
+> any repo can adopt it with one command.
 
 ## Why
 

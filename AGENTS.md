@@ -5,8 +5,8 @@
 A framework that installs a tiered PR merge policy into any repo: a deterministic
 blast-radius classifier (`engine/`), GitHub bot workflows + starter config
 (`templates/`), a CLI (`cli/`), and a single-source agent skill (`skill/`). The
-`blast-radius` CLI scaffolds these into a target repo. Extracted from
-series-ai/venus and generalized.
+`blast-radius` CLI scaffolds these into a target repo. Extracted from a
+production merge-policy system and generalized.
 
 ## The load-bearing split (do not blur it)
 
@@ -38,8 +38,8 @@ series-ai/venus and generalized.
 - **Skill has one source:** edit `skill/SKILL.src.md` only; the per-provider
   copies under `.claude/`, `.cursor/`, `.agents/` are build output of
   `scripts/build-skills.mjs`. Never hand-edit them.
-- **Workflow templates are venus-derived:** they carry a `SCAFFOLDED BY` banner
-  and TODOs (secrets, reviewer pool). Keep them generic — no org handles or
+- **Workflow templates carry a `SCAFFOLDED BY` banner** and TODOs (secrets,
+  reviewer pool). Keep them generic — no org handles or
   product paths.
 - **Versioning:** `package.json`, `.claude-plugin/plugin.json`, and
   `.claude-plugin/marketplace.json` carry the version — keep them in sync.

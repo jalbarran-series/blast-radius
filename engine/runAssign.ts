@@ -11,8 +11,8 @@
  *
  * Usage (from .github/blast-radius/):
  *   npm run assign -- --pr 2062
- *   npm run assign -- --files client/contexts/AuthContext.tsx,client/foo.ts --author cantimary
- *   npm run assign -- --files server/cloud-run/src/x.payments.ts --author jruis --tier 3
+ *   npm run assign -- --files src/auth/session.ts,src/foo.ts --author alice
+ *   npm run assign -- --files src/payments/charge.ts --author bob --tier 3
  *
  * --pr mode reads files/author/assignees via `gh` and the tier from the live
  * `blast-radius` status. --files mode is fully offline (tier from the path-based
@@ -24,12 +24,13 @@ import { readFileSync } from 'node:fs';
 import { classify } from './classify';
 import { tier3Assignee } from './codeowners';
 
-// Mirror of bot-auto-assign-pr.yml constants — keep in parity.
-const AUTHOR_OVERRIDES: Record<string, string> = {
-  'run-factory-bot[bot]': 'jruis',
-  'series-percy[bot]': 'series-phil',
-};
-const FALLBACK_POOL = ['jruis', 'cantimary', 'paullpp', 'AntonioSeries', 'jhusting-series', 'jalbarran-series'];
+// Per-repo routing data. Populate these to mirror your bot-auto-assign-pr.yml so
+// the local dry-run matches the live workflow. Both are intentionally empty in
+// the shipped engine (no repo-specific handles): AUTHOR_OVERRIDES maps a PR
+// author (e.g. a bot) to a fixed assignee; FALLBACK_POOL is the reviewer pool
+// used when AUTOASSIGN_POOL is unset.
+const AUTHOR_OVERRIDES: Record<string, string> = {};
+const FALLBACK_POOL: string[] = [];
 
 interface PoolEntry { login: string; pausedUntil?: string; reason?: string }
 

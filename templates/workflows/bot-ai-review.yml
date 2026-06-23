@@ -3,7 +3,6 @@
 # (ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY — see the env block
 # below), fill the reviewer pool / AUTHOR_OVERRIDES in auto-assign, and
 # configure branch rulesets so the merge-policy-gate status is required.
-# Ported from series-ai/venus.
 
 name: "Bot: AI Review"
 

@@ -2,7 +2,7 @@
 # Set the ai-review model's API key secret (one of ANTHROPIC_API_KEY,
 # OPENAI_API_KEY, or GEMINI_API_KEY — match AI_REVIEW_MODEL in bot-ai-review.yml),
 # fill the reviewer pool / AUTHOR_OVERRIDES in auto-assign, and configure branch
-# rulesets so the merge-policy-gate status is required. Ported from series-ai/venus.
+# rulesets so the merge-policy-gate status is required.
 
 name: "Bot: Merge Policy"
 
@@ -83,28 +83,28 @@ jobs:
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request && contains(github.event.comment.body, '/po-verified'))
     runs-on: ubuntu-latest
-    # Opt in to `development` to read the env-scoped FACTORY_* app creds.
+    # Opt in to `development` to read the env-scoped MERGE_APP_* app creds.
     environment:
       name: development
       deployment: false
     steps:
-      # Merge under the run-factory-bot app, not GITHUB_TOKEN: pushes made by
-      # GITHUB_TOKEN don't trigger `on: push` CD, so gate-merged PRs never
-      # deployed. FACTORY_APP_ID / FACTORY_APP_PRIVATE_KEY are the run-factory-bot
-      # app id + key (the same app + env vars/secrets already used by
-      # factory-agent-task.yml).
+      # Merge under a GitHub App, not GITHUB_TOKEN: pushes made by GITHUB_TOKEN
+      # don't trigger `on: push` CD, so gate-merged PRs never deployed. Set
+      # MERGE_APP_ID (repo variable) + MERGE_APP_PRIVATE_KEY (secret) to a GitHub
+      # App installed on the repo with contents:write + pull-requests:write. If
+      # unset, the step degrades to GITHUB_TOKEN (CD won't fire on merge).
       - name: Mint merge-bot token
         id: app-token
         # `if` can't gate on the secret (secrets aren't readable in step `if`),
         # so a set app-id with a missing/invalid key would otherwise error here
         # and wedge the gate. continue-on-error degrades to GITHUB_TOKEN (the
         # `|| github.token` fallback below) instead of failing the whole job.
-        if: ${{ vars.FACTORY_APP_ID != '' }}
+        if: ${{ vars.MERGE_APP_ID != '' }}
         continue-on-error: true
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ vars.FACTORY_APP_ID }}
-          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.MERGE_APP_ID }}
+          private-key: ${{ secrets.MERGE_APP_PRIVATE_KEY }}
 
       - name: Evaluate merge policy
         uses: actions/github-script@v7

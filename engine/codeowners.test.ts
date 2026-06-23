@@ -3,24 +3,24 @@ import { codeownerApprovalMet, ownersFor, parseCodeowners, patternToRegExp, tier
 
 const CODEOWNERS = [
   '# comment',
-  '/.github/workflows/                                   @paullpp',
-  '/.github/blast-radius/                                @paullpp',
-  '/packages/sdk/src/**/index.ts                         @series-phil',
-  '/server/cloud-run/src/**/*auth*                        @cantimary',
-  '/server/cloud-run/src/**/*payments*                    @Zee-Series-AI',
+  '/.github/workflows/                                   @alice',
+  '/.github/blast-radius/                                @alice',
+  '/packages/sdk/src/**/index.ts                         @dave',
+  '/server/cloud-run/src/**/*auth*                        @bob',
+  '/server/cloud-run/src/**/*payments*                    @Payments-Team',
 ].join('\n');
 
 // Ordered owners (primary + backups), as in `.github/blast-radius/owners`.
 const OWNERS = [
-  '/client/contexts/AuthContext.tsx                      @paullpp @cantimary @jruis',
-  '/server/cloud-run/src/**/*payments*                    @Zee-Series-AI @series-phil @jruis',
+  '/client/contexts/AuthContext.tsx                      @alice @bob @carol',
+  '/server/cloud-run/src/**/*payments*                    @Payments-Team @dave @carol',
 ].join('\n');
 
 describe('parseCodeowners', () => {
   it('skips comments and blank lines, keeps pattern + owners', () => {
     const rules = parseCodeowners(CODEOWNERS);
     expect(rules).toHaveLength(5);
-    expect(rules[0]).toEqual({ pattern: '/.github/workflows/', owners: ['@paullpp'] });
+    expect(rules[0]).toEqual({ pattern: '/.github/workflows/', owners: ['@alice'] });
   });
 });
 
@@ -43,11 +43,11 @@ describe('patternToRegExp', () => {
 describe('ownersFor (last match wins)', () => {
   it('payments rule beats the broad auth glob for a payments file', () => {
     const rules = parseCodeowners(CODEOWNERS);
-    expect(ownersFor('server/cloud-run/src/services/payments.service.ts', rules)).toEqual(['@Zee-Series-AI']);
+    expect(ownersFor('server/cloud-run/src/services/payments.service.ts', rules)).toEqual(['@Payments-Team']);
   });
-  it('auth file routes to cantimary', () => {
+  it('auth file routes to bob', () => {
     const rules = parseCodeowners(CODEOWNERS);
-    expect(ownersFor('server/cloud-run/src/middleware/authToken.ts', rules)).toEqual(['@cantimary']);
+    expect(ownersFor('server/cloud-run/src/middleware/authToken.ts', rules)).toEqual(['@bob']);
   });
   it('unowned file → no owners', () => {
     const rules = parseCodeowners(CODEOWNERS);
@@ -60,7 +60,7 @@ describe('codeownerApprovalMet', () => {
     const r = codeownerApprovalMet(
       ['server/cloud-run/src/services/payments.service.ts'],
       CODEOWNERS,
-      ['Zee-Series-AI'],
+      ['Payments-Team'],
     );
     expect(r.met).toBe(true);
   });
@@ -76,17 +76,17 @@ describe('codeownerApprovalMet', () => {
   });
 
   it('login match is case-insensitive and @-insensitive', () => {
-    const r = codeownerApprovalMet(['.github/workflows/x.yml'], CODEOWNERS, ['PaulLpp']);
+    const r = codeownerApprovalMet(['.github/workflows/x.yml'], CODEOWNERS, ['Alice']);
     expect(r.met).toBe(true);
   });
 
   it('multiple owned files need each owner to approve', () => {
     const files = [
-      'server/cloud-run/src/middleware/authToken.ts', // @cantimary
-      'server/cloud-run/src/services/payments.service.ts', // @Zee-Series-AI
+      'server/cloud-run/src/middleware/authToken.ts', // @bob
+      'server/cloud-run/src/services/payments.service.ts', // @Payments-Team
     ];
-    expect(codeownerApprovalMet(files, CODEOWNERS, ['cantimary']).met).toBe(false);
-    expect(codeownerApprovalMet(files, CODEOWNERS, ['cantimary', 'Zee-Series-AI']).met).toBe(true);
+    expect(codeownerApprovalMet(files, CODEOWNERS, ['bob']).met).toBe(false);
+    expect(codeownerApprovalMet(files, CODEOWNERS, ['bob', 'Payments-Team']).met).toBe(true);
   });
 
   it('unowned files are not gated', () => {
@@ -98,30 +98,30 @@ describe('codeownerApprovalMet', () => {
 describe('tier3Assignee', () => {
   it('picks the primary owner when available', () => {
     const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'someone-else' });
-    expect(r.ordered).toEqual(['paullpp', 'cantimary', 'jruis']);
-    expect(r.pick).toBe('paullpp');
+    expect(r.ordered).toEqual(['alice', 'bob', 'carol']);
+    expect(r.pick).toBe('alice');
   });
 
   it('skips the author to the next owner (backup covers a primary-authored PR)', () => {
-    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'paullpp' });
-    expect(r.pick).toBe('cantimary');
+    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'alice' });
+    expect(r.pick).toBe('bob');
   });
 
   it('skips paused (OOO) owners to the next backup', () => {
-    const isPaused = (l: string): boolean => l === 'paullpp' || l === 'cantimary';
+    const isPaused = (l: string): boolean => l === 'alice' || l === 'bob';
     const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'someone-else', isPaused });
-    expect(r.pick).toBe('jruis');
+    expect(r.pick).toBe('carol');
   });
 
   it('returns null when every owner is author/OOO (→ load-balanced fallback)', () => {
-    const isPaused = (l: string): boolean => l === 'cantimary' || l === 'jruis';
-    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'paullpp', isPaused });
+    const isPaused = (l: string): boolean => l === 'bob' || l === 'carol';
+    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'alice', isPaused });
     expect(r.pick).toBeNull();
   });
 
   it('last-match-wins picks the payments owners for a payments file', () => {
     const r = tier3Assignee(['server/cloud-run/src/services/payments.service.ts'], OWNERS, { author: 'x' });
-    expect(r.pick).toBe('zee-series-ai');
+    expect(r.pick).toBe('payments-team');
   });
 
   // The load-balanced PICK + suggested-reviewer tie-break live inlined in
@@ -129,19 +129,19 @@ describe('tier3Assignee', () => {
   // `eligible` set the workflow balances over. Pick is dry-run-checked via runAssign.ts.
   it('exposes the eligible owners (non-author, non-OOO) in order for load-balancing', () => {
     const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'someone-else' });
-    expect(r.eligible).toEqual(['paullpp', 'cantimary', 'jruis']);
+    expect(r.eligible).toEqual(['alice', 'bob', 'carol']);
   });
 
   it('eligible drops the author and paused owners but keeps order', () => {
-    const isPaused = (l: string): boolean => l === 'cantimary';
-    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'paullpp', isPaused });
-    expect(r.eligible).toEqual(['jruis']);
-    expect(r.pick).toBe('jruis');
+    const isPaused = (l: string): boolean => l === 'bob';
+    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'alice', isPaused });
+    expect(r.eligible).toEqual(['carol']);
+    expect(r.pick).toBe('carol');
   });
 
   it('eligible is empty (→ load-balanced pool fallback) when every owner is author/OOO', () => {
-    const isPaused = (l: string): boolean => l === 'cantimary' || l === 'jruis';
-    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'paullpp', isPaused });
+    const isPaused = (l: string): boolean => l === 'bob' || l === 'carol';
+    const r = tier3Assignee(['client/contexts/AuthContext.tsx'], OWNERS, { author: 'alice', isPaused });
     expect(r.eligible).toEqual([]);
     expect(r.pick).toBeNull();
   });

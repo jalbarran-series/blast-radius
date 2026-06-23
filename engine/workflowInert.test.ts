@@ -41,7 +41,7 @@ describe('inertWorkflowFiles', () => {
     ["+            --set-env-vars=FOO=${{ vars.FOO }}", true],            // bare
     ["+            --set-env-vars=FOO=${{ env.FOO }}", true],             // env. form
     ["+            --set-env-vars=FOO=${{ vars.FOO || 'x' }}", true],     // safe literal default
-    ["+            --set-env-vars=FOO=${{ vars.FOO || 'series.ai' }}", true], // dotted literal default
+    ["+            --set-env-vars=FOO=${{ vars.FOO || 'example.com' }}", true], // dotted literal default
     ["+            --set-env-vars=FOO=${{ vars.FOO || 8080 }}", false],   // unquoted default
     ["+            --set-env-vars=FOO=${{ vars.A || vars.B }}", false],   // nested expr
     ["+            --set-env-vars=FOO=${{ vars.FOO }},BAR=${{ vars.BAR }}", false], // multi-var
