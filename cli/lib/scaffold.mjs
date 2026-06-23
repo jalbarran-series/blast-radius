@@ -63,16 +63,21 @@ export function scaffold(targetDir) {
     copyFile(join(wfDir, f), join(targetDir, '.github', 'workflows', f), { overwrite: false });
   }
 
-  // 6. Agent skill — framework-owned, overwrite. Strip the build-only `.src` note.
+  // 6. Agent skill — framework-owned, installed into every agent dir (so the
+  //    repo's Claude / Cursor / Codex+Pi agents all gain `/blast-radius`).
   const skillSrc = readFileSync(join(FRAMEWORK_ROOT, 'skill', 'SKILL.src.md'), 'utf8');
-  const skillDest = join(targetDir, '.claude', 'skills', 'pr-blast-radius', 'SKILL.md');
-  mkdirSync(dirname(skillDest), { recursive: true });
-  writeFileSync(skillDest, skillSrc);
-  log(`  wrote          ${skillDest}`);
+  const refDir = join(FRAMEWORK_ROOT, 'skill', 'reference');
+  for (const dir of ['.claude/skills', '.cursor/skills', '.agents/skills']) {
+    const skillDir = join(targetDir, dir, 'blast-radius');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), skillSrc);
+    cpSync(refDir, join(skillDir, 'reference'), { recursive: true });
+    log(`  wrote          ${join(targetDir, dir, 'blast-radius')}/`);
+  }
 
   log('');
-  log('Done. Next:');
-  log(`  1. cd ${br} && npm install && npm test   # validate config + owners`);
-  log('  2. Edit config.yml tiers + owners for THIS repo.');
+  log('Installed. Next:');
+  log('  1. Run `/blast-radius init` in your agent to tailor config.yml + owners to THIS repo.');
+  log(`  2. cd ${br} && npm install && npm test   # validate config + owners`);
   log('  3. Adapt .github/workflows/bot-*.yml (secrets, reviewer pool) before enabling.');
 }

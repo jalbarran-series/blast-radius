@@ -20,19 +20,21 @@ function help() {
   console.log(`blast-radius — tiered PR merge policy, installable into any repo
 
 Usage:
-  blast-radius init [targetDir]         Scaffold engine + config + workflows + skill
-  blast-radius doctor [targetDir]       Validate this repo's config.yml + owners
+  blast-radius install [targetDir]      Scaffold engine + workflows + starter config + skill
+  blast-radius doctor  [targetDir]      Validate this repo's config.yml + owners
   blast-radius classify <file>...       Print the tier for a set of changed files
   blast-radius help
 
+After install, run \`/blast-radius init\` in your agent to tailor config.yml + owners.
+
 Notes:
-  - init never clobbers config.yml / owners / workflows once a repo owns them.
+  - install never clobbers config.yml / owners / workflows once a repo owns them.
   - doctor + classify use the config at <repo>/.github/blast-radius/config.yml
     (override with --config <path>).`);
 }
 
 switch (cmd) {
-  case 'init': {
+  case 'install': {
     const target = resolve(rest[0] || '.');
     scaffold(target);
     break;

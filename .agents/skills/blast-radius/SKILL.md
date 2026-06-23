@@ -1,14 +1,27 @@
 ---
-name: pr-blast-radius
-description: Blast-radius tiered PR merge policy — how PRs are auto-classified Tier 0–3 and what's required to merge. Use when opening a PR, predicting its tier, reporting merge state to a human, or authoring changes that touch auth, secrets, migrations, CI workflows, public package APIs, or feature flags.
+name: blast-radius
+description: Blast-radius tiered PR merge policy — how PRs are auto-classified Tier 0–3 and what's required to merge, plus commands to set up and explain it. Use when opening a PR, predicting its tier, reporting merge state to a human, authoring changes that touch auth/secrets/migrations/CI/public APIs, or when the user invokes `/blast-radius init` or `/blast-radius explain`.
 ---
 
-# PR Blast-Radius Policy
+# Blast-Radius PR Merge Policy
 
 Every PR is classified into a **tier (0–3) by blast radius** (how much damage it
 can do), not line count. The tier sets what's required to merge. Bots classify on
 push and post two sticky comments: **blast radius** (why this tier) and **merge
 policy** (what's required). Read both before reporting mergeability to a human.
+
+## Commands
+
+Invoke as `/blast-radius <command>`.
+
+| Command | Does | Reference |
+|---|---|---|
+| `init` | Analyze this repo's layout and write a **tailored** `config.yml` + `owners` — decide which paths are Tier 3 (auth/secrets/migrations/CI/public APIs) vs Tier 2/0. Run after `npx blast-radius install`. | [reference/init.md](reference/init.md) |
+| `explain [pr\|files]` | Explain why a PR (or file set) lands in its tier and exactly what's required to merge it. Grounded in `config.yml`. | [reference/explain.md](reference/explain.md) |
+
+The CLI (`npx blast-radius install`) drops the deterministic pieces (compiled
+engine, bot workflows, a generic starter config, this skill). `/blast-radius init`
+is the judgment step that tailors the config to *this* repo.
 
 ## The single source of truth — never restate it from memory
 

@@ -14,7 +14,10 @@ series-ai/venus and generalized.
   repo's paths. Its tests run against `engine/__fixtures__/`, not any real config.
 - **`templates/` is the per-repo surface.** `config.yml` + `owners` +
   `config.validate.test.ts` are scaffolded and then owned by the consumer repo.
-  `init` never clobbers them; it does overwrite the engine `.ts` files.
+  `install` never clobbers them; it does overwrite the compiled engine `.mjs`.
+- **Two-layer UX (like impeccable):** CLI `blast-radius install` = deterministic
+  scaffold + skill install into agent dirs; the agent command `/blast-radius init`
+  (defined in `skill/SKILL.src.md`'s command router) = per-repo config tailoring.
 
 ## Commands
 
@@ -22,7 +25,7 @@ series-ai/venus and generalized.
 |---|---|
 | Engine tests | `npm test` (vitest against `engine/`) |
 | Build skill into agent dirs | `npm run build:skills` |
-| Scaffold into a repo | `node cli/bin/cli.js init <dir>` |
+| Scaffold into a repo | `node cli/bin/cli.js install <dir>` |
 | Validate a repo's config | `node cli/bin/cli.js doctor <dir>` |
 | Classify files | `node cli/bin/cli.js classify <file>...` |
 

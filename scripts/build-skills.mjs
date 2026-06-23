@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SKILL_NAME = 'pr-blast-radius';
+const SKILL_NAME = 'blast-radius';
 
 // Provider dir → where its skills live. Add a provider by adding a row.
 const PROVIDERS = [

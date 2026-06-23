@@ -37,7 +37,7 @@
     "build": "node scripts/build-engine.mjs",
     "build:skills": "node scripts/build-skills.mjs",
     "prepack": "node scripts/build-engine.mjs",
-    "init": "node cli/bin/cli.js init",
+    "setup": "node cli/bin/cli.js install",
     "doctor": "node cli/bin/cli.js doctor"
   },
   "dependencies": {
