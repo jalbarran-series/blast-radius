@@ -44,13 +44,15 @@ env:
   # The reviewer model. Provider-agnostic: any model the pinned
   # @mariozechner/pi-coding-agent registry exposes works here. Override per repo
   # via the AI_REVIEW_MODEL repo variable, e.g.:
-  #   anthropic/claude-opus-4-7   (default; needs ANTHROPIC_API_KEY)
+  #   anthropic/claude-opus-4-8   (default; needs ANTHROPIC_API_KEY)
   #   openai/gpt-5                (needs OPENAI_API_KEY)
   #   google/gemini-2.5-pro       (needs GEMINI_API_KEY)
   # Set the matching secret in the review step's env below. The model string
   # must exist in the pinned pi-coding-agent registry or the run errors — bump
-  # the pin and this default together when adopting a newer model.
-  AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'anthropic/claude-opus-4-7' }}
+  # the pin and this default together when adopting a newer model. (The default
+  # below requires a pi-agent action pinning pi-coding-agent recent enough to
+  # include claude-opus-4-8.)
+  AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'anthropic/claude-opus-4-8' }}
   # Reasoning effort for the reviewer. Override via the AI_REVIEW_THINKING repo
   # variable; one of: off | minimal | low | medium | high | xhigh. Empty (the
   # default) leaves the model/provider default untouched. It is composed onto

@@ -46,7 +46,7 @@ workflows (secrets, reviewer pool) before enabling them.
 The AI review bot is model-agnostic: set the `AI_REVIEW_MODEL` repo variable to
 any model the pinned `pi-coding-agent` registry exposes (Anthropic, OpenAI, or
 Gemini) and provide the matching API-key secret. Default is
-`anthropic/claude-opus-4-7`. Tune reasoning effort with the `AI_REVIEW_THINKING`
+`anthropic/claude-opus-4-8`. Tune reasoning effort with the `AI_REVIEW_THINKING`
 repo variable (`off | minimal | low | medium | high | xhigh`; empty = provider
 default) — don't bake a `:level` into `AI_REVIEW_MODEL` yourself.
 
