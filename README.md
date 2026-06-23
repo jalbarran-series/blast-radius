@@ -18,7 +18,7 @@ deterministic classifier measures blast radius on every push.
 ## Install into a repo
 
 ```bash
-npx blast-radius install                 # drop engine + workflows + starter config + skill
+npx @series-inc/blast-radius install     # drop engine + workflows + starter config + skill
 # then, in your AI agent:
 /blast-radius init                       # tailor config.yml + owners to THIS repo
 cd .github/blast-radius && npm install && npm test   # validate config + owners
