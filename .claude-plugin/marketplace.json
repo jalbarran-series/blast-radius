@@ -11,7 +11,7 @@
     {
       "name": "blast-radius",
       "description": "Deterministic blast-radius classifier, bot workflows, and an agent skill, installable into any repo via `blast-radius init`.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "source": "./",
       "category": "ci-cd",
       "homepage": "https://github.com/drekki/blast-radius",
