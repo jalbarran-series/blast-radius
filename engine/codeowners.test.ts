@@ -57,20 +57,16 @@ describe('ownersFor (last match wins)', () => {
 
 describe('codeownerApprovalMet', () => {
   it('owner approval satisfies the gate', () => {
-    const r = codeownerApprovalMet(
-      ['server/cloud-run/src/services/payments.service.ts'],
-      CODEOWNERS,
-      ['Payments-Team'],
-    );
+    const r = codeownerApprovalMet(['server/cloud-run/src/services/payments.service.ts'], CODEOWNERS, [
+      'Payments-Team',
+    ]);
     expect(r.met).toBe(true);
   });
 
   it('REGRESSION: non-owner approval does NOT satisfy the gate', () => {
-    const r = codeownerApprovalMet(
-      ['server/cloud-run/src/services/payments.service.ts'],
-      CODEOWNERS,
-      ['some-other-dev'],
-    );
+    const r = codeownerApprovalMet(['server/cloud-run/src/services/payments.service.ts'], CODEOWNERS, [
+      'some-other-dev',
+    ]);
     expect(r.met).toBe(false);
     expect(r.missing).toContain('server/cloud-run/src/services/payments.service.ts');
   });

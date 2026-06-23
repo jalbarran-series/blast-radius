@@ -30,9 +30,7 @@ export function isFlagContained({ flagName, diffText, featureFlagsSource }: Flag
   // Assigned/keyed to a non-`false` value (`: true`, `= true`, `= <expr>`).
   const assignedTruthy = new RegExp(`${wb}['"\`]?\\s*\\]?\\s*[:=]\\s*(?!false\\b)\\S`).test(src);
   // Listed as a quoted array element (a loop sets every listed flag on).
-  const inArray =
-    new RegExp(`['"\`]${esc}['"\`]\\s*,`).test(src) ||
-    new RegExp(`,\\s*['"\`]${esc}['"\`]`).test(src);
+  const inArray = new RegExp(`['"\`]${esc}['"\`]\\s*,`).test(src) || new RegExp(`,\\s*['"\`]${esc}['"\`]`).test(src);
 
   if (assignedTruthy || inArray) return false; // possibly ON → don't cap
   return true; // absent, or only ever assigned `false` → off → dark

@@ -23,7 +23,10 @@ function arg(name: string, fallback = ''): string {
 
 function readLines(path: string): string[] {
   if (!path || !existsSync(path)) return [];
-  return readFileSync(path, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean);
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
 }
 
 /** Map of changed file -> git status letter (A/M/D/R...) for base...HEAD. */
@@ -81,7 +84,11 @@ function main(): void {
   const headFiles: Record<string, string> = {};
   for (const f of effective) {
     if (existsSync(f)) {
-      try { headFiles[f] = readFileSync(f, 'utf8'); } catch { /* unreadable; skip */ }
+      try {
+        headFiles[f] = readFileSync(f, 'utf8');
+      } catch {
+        /* unreadable; skip */
+      }
     }
   }
   const escalation = contentEscalations({ diff: diffText, headFiles, cfg });
@@ -91,7 +98,9 @@ function main(): void {
   const inertWorkflows = inertWorkflowFiles(diffText, cfg);
 
   const result = classify(files, { cfgPath, flagContained, addedOnly, escalation, inertWorkflows });
-  process.stdout.write(JSON.stringify({ ...result, flagContained, addedOnly, escalationTier: escalation.tier, inertWorkflows }) + '\n');
+  process.stdout.write(
+    JSON.stringify({ ...result, flagContained, addedOnly, escalationTier: escalation.tier, inertWorkflows }) + '\n',
+  );
 }
 
 main();

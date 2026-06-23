@@ -32,7 +32,11 @@ import { tier3Assignee } from './codeowners';
 const AUTHOR_OVERRIDES: Record<string, string> = {};
 const FALLBACK_POOL: string[] = [];
 
-interface PoolEntry { login: string; pausedUntil?: string; reason?: string }
+interface PoolEntry {
+  login: string;
+  pausedUntil?: string;
+  reason?: string;
+}
 
 function arg(name: string, fallback = ''): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -52,15 +56,26 @@ function parsePool(): { pool: string[]; isPaused: (login: string) => boolean } {
     process.stderr.write(`AUTOASSIGN_POOL parse failed (${String(err)}); using fallback pool.\n`);
   }
   const isPaused = (login: string): boolean =>
-    Array.isArray(cfg) && cfg.some((e) =>
-      e.login && e.login.toLowerCase() === login.toLowerCase() && !!e.pausedUntil && e.pausedUntil >= today);
-  const pool = Array.isArray(cfg) && cfg.length
-    ? cfg.filter((e) => !e.pausedUntil || e.pausedUntil < today).map((e) => e.login).filter(Boolean)
-    : FALLBACK_POOL;
+    Array.isArray(cfg) &&
+    cfg.some(
+      (e) => e.login && e.login.toLowerCase() === login.toLowerCase() && !!e.pausedUntil && e.pausedUntil >= today,
+    );
+  const pool =
+    Array.isArray(cfg) && cfg.length
+      ? cfg
+          .filter((e) => !e.pausedUntil || e.pausedUntil < today)
+          .map((e) => e.login)
+          .filter(Boolean)
+      : FALLBACK_POOL;
   return { pool: pool.length ? pool : FALLBACK_POOL, isPaused };
 }
 
-interface PrInfo { files: string[]; author: string; assignees: string[]; tier: number | null }
+interface PrInfo {
+  files: string[];
+  author: string;
+  assignees: string[];
+  tier: number | null;
+}
 
 function fromPr(prNum: string): PrInfo {
   const pr = JSON.parse(gh(['pr', 'view', prNum, '--json', 'files,author,assignees,headRefOid']));
@@ -96,7 +111,10 @@ function main(): void {
   if (prNum) {
     info = fromPr(prNum);
   } else {
-    const files = arg('files').split(',').map((s) => s.trim()).filter(Boolean);
+    const files = arg('files')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (!files.length) {
       process.stderr.write('Provide --pr N or --files a,b,c (with --author).\n');
       process.exit(2);
@@ -122,7 +140,9 @@ function main(): void {
   out.push(`Author: ${author || '(unknown)'}`);
   out.push(`Tier: ${tier}  [${tierSource}]`);
   if (info.assignees.length) {
-    out.push(`Current assignees: ${info.assignees.join(', ')} → bot LEAVES AS-IS (never overrides). Below = what it WOULD pick if unassigned.`);
+    out.push(
+      `Current assignees: ${info.assignees.join(', ')} → bot LEAVES AS-IS (never overrides). Below = what it WOULD pick if unassigned.`,
+    );
   }
 
   // ---- decide (mirrors the workflow) ----

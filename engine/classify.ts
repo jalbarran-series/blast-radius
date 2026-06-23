@@ -98,8 +98,7 @@ export const SELF_PROTECT_GLOBS = [
  *  Shared infra, still reviewed — but off the Tier-3 owner/manual-merge gate. */
 export const WORKFLOW_INERT_TIER = 2;
 
-export const loadConfig = (cfgPath: string): BlastConfig =>
-  parse(readFileSync(cfgPath, 'utf8')) as BlastConfig;
+export const loadConfig = (cfgPath: string): BlastConfig => parse(readFileSync(cfgPath, 'utf8')) as BlastConfig;
 
 const isAsset = (file: string, cfg: BlastConfig): boolean =>
   cfg.inert_asset_extensions.some((ext) => file.toLowerCase().endsWith(ext));
@@ -123,9 +122,7 @@ export function classify(changedFiles: string[], opts: ClassifyOptions): Classif
   // classifier/config/prompts/CODEOWNERS) so the exemption can never weaken the
   // rules that govern classification — only a workflow whose diff is provably
   // inert (var-forward/comment-only, verified from the base ref) is eligible.
-  const inertWorkflows = new Set(
-    (opts.inertWorkflows ?? []).filter((f) => matchAny(f, ['.github/workflows/**'])),
-  );
+  const inertWorkflows = new Set((opts.inertWorkflows ?? []).filter((f) => matchAny(f, ['.github/workflows/**'])));
 
   let max = 0;
   let driver = '';
@@ -139,7 +136,9 @@ export function classify(changedFiles: string[], opts: ClassifyOptions): Classif
   if (driver) reasons.push(`tier ${max} from \`${driver}\``);
   if (inertWorkflows.size > 0) {
     const names = [...inertWorkflows].map((f) => `\`${f}\``).join(', ');
-    reasons.push(`workflow change treated as inert (tier ${WORKFLOW_INERT_TIER}): ${names} — diff only forwards repo vars / comments`);
+    reasons.push(
+      `workflow change treated as inert (tier ${WORKFLOW_INERT_TIER}): ${names} — diff only forwards repo vars / comments`,
+    );
   }
 
   // Self-protect floor: any change to the classifier, its config, the

@@ -88,17 +88,20 @@ describe('classify', () => {
 
   it('self-protect floor: classifier/config edits are tier 3 even with a WEAKENED config', () => {
     const weak = join(tmpdir(), `weak-blast-${Date.now()}.yml`);
-    writeFileSync(weak, [
-      'tiers:',
-      '  "0":',
-      '    - ".github/**"',
-      'default_tier: 0',
-      'generated: []',
-      'inert_asset_extensions: []',
-      'auto_reachable: []',
-      'escalations: []',
-      'sentinel: { token: "x", region_start: "y", region_end: "z" }',
-    ].join('\n'));
+    writeFileSync(
+      weak,
+      [
+        'tiers:',
+        '  "0":',
+        '    - ".github/**"',
+        'default_tier: 0',
+        'generated: []',
+        'inert_asset_extensions: []',
+        'auto_reachable: []',
+        'escalations: []',
+        'sentinel: { token: "x", region_start: "y", region_end: "z" }',
+      ].join('\n'),
+    );
     const r = classify(['.github/blast-radius/config.yml'], { cfgPath: weak, addedOnly: true });
     expect(r.tier).toBe(3);
     expect(r.reasons.join(' ')).toContain('self-protected');
@@ -121,10 +124,10 @@ describe('classify', () => {
   });
 
   it('inert workflow + a tier-3 source file → still tier 3 (exemption is per-file)', () => {
-    const r = classify(
-      ['.github/workflows/deploy.yml', 'src/auth/session.ts'],
-      { cfgPath, inertWorkflows: ['.github/workflows/deploy.yml'] },
-    );
+    const r = classify(['.github/workflows/deploy.yml', 'src/auth/session.ts'], {
+      cfgPath,
+      inertWorkflows: ['.github/workflows/deploy.yml'],
+    });
     expect(r.tier).toBe(3);
     expect(r.reasons.join(' ')).toContain('session.ts');
     expect(r.reasons.join(' ')).toContain('inert');
@@ -132,17 +135,20 @@ describe('classify', () => {
 
   it('inertWorkflows cannot exempt the classifier/config — floor holds under a WEAKENED config', () => {
     const weak = join(tmpdir(), `weak-inert-${Date.now()}.yml`);
-    writeFileSync(weak, [
-      'tiers:',
-      '  "0":',
-      '    - ".github/**"',
-      'default_tier: 0',
-      'generated: []',
-      'inert_asset_extensions: []',
-      'auto_reachable: []',
-      'escalations: []',
-      'sentinel: { token: "x", region_start: "y", region_end: "z" }',
-    ].join('\n'));
+    writeFileSync(
+      weak,
+      [
+        'tiers:',
+        '  "0":',
+        '    - ".github/**"',
+        'default_tier: 0',
+        'generated: []',
+        'inert_asset_extensions: []',
+        'auto_reachable: []',
+        'escalations: []',
+        'sentinel: { token: "x", region_start: "y", region_end: "z" }',
+      ].join('\n'),
+    );
     const r = classify(['.github/blast-radius/config.yml'], {
       cfgPath: weak,
       inertWorkflows: ['.github/blast-radius/config.yml'],
@@ -153,18 +159,21 @@ describe('classify', () => {
 
   it('self-protect floor covers the AI-review prompt even under a WEAKENED config', () => {
     const weak = join(tmpdir(), `weak-prompt-${Date.now()}.yml`);
-    writeFileSync(weak, [
-      'tiers:',
-      '  "0":',
-      '    - "**/*.md"',
-      '    - ".github/**"',
-      'default_tier: 0',
-      'generated: []',
-      'inert_asset_extensions: []',
-      'auto_reachable: []',
-      'escalations: []',
-      'sentinel: { token: "x", region_start: "y", region_end: "z" }',
-    ].join('\n'));
+    writeFileSync(
+      weak,
+      [
+        'tiers:',
+        '  "0":',
+        '    - "**/*.md"',
+        '    - ".github/**"',
+        'default_tier: 0',
+        'generated: []',
+        'inert_asset_extensions: []',
+        'auto_reachable: []',
+        'escalations: []',
+        'sentinel: { token: "x", region_start: "y", region_end: "z" }',
+      ].join('\n'),
+    );
     const r = classify(['.github/prompts/ai-review.md'], { cfgPath: weak, addedOnly: true });
     expect(r.tier).toBe(3);
     expect(r.reasons.join(' ')).toContain('self-protected');

@@ -22,7 +22,10 @@ import { parseCodeowners } from './codeowners';
 export function sampleFileFor(pattern: string): string {
   let p = pattern.replace(/^\//, '');
   if (p.endsWith('/')) p += '**';
-  p = p.replace(/\*\*\//g, 'x/').replace(/\*\*/g, 'x').replace(/\*/g, 'x');
+  p = p
+    .replace(/\*\*\//g, 'x/')
+    .replace(/\*\*/g, 'x')
+    .replace(/\*/g, 'x');
   if (p.endsWith('/')) p += 'x.ts';
   return p;
 }

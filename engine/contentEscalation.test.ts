@@ -4,9 +4,20 @@ import type { BlastConfig } from './classify';
 
 const cfg = {
   escalations: [
-    { name: 'bootstrap-order', reason: 'init order', paths: ['server/cloud-run/src/**'], pattern: 'INIT_ORDER', tier: 3 },
+    {
+      name: 'bootstrap-order',
+      reason: 'init order',
+      paths: ['server/cloud-run/src/**'],
+      pattern: 'INIT_ORDER',
+      tier: 3,
+    },
   ],
-  sentinel: { token: 'blast-radius:t3', region_start: 'blast-radius:t3:start', region_end: 'blast-radius:t3:end', tier: 3 },
+  sentinel: {
+    token: 'blast-radius:t3',
+    region_start: 'blast-radius:t3:start',
+    region_end: 'blast-radius:t3:end',
+    tier: 3,
+  },
 } as unknown as BlastConfig;
 
 const diff = (body: string) => body.trimStart();

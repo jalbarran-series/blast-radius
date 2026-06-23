@@ -62,11 +62,7 @@ export function update(targetDir) {
   for (const f of readdirSync(wfDir)) {
     reconcile(join(wfDir, f), join(targetDir, '.github', 'workflows', f), drift);
   }
-  reconcile(
-    join(tpl, 'PULL_REQUEST_TEMPLATE.md'),
-    join(targetDir, '.github', 'PULL_REQUEST_TEMPLATE.md'),
-    drift,
-  );
+  reconcile(join(tpl, 'PULL_REQUEST_TEMPLATE.md'), join(targetDir, '.github', 'PULL_REQUEST_TEMPLATE.md'), drift);
 
   log('');
   if (drift.length === 0) {
