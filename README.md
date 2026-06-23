@@ -40,15 +40,44 @@ judgment (which paths are Tier 3 in *this* repo).
 | `.github/PULL_REQUEST_TEMPLATE.md` | your repo | no |
 | `.claude/`, `.cursor/`, `.agents/skills/blast-radius/` | framework | yes |
 
-Then: edit `config.yml` tiers + `owners` for your paths, and adapt the bot
-workflows (secrets, reviewer pool) before enabling them.
+Then: edit `config.yml` tiers + `owners` for your paths, configure the secrets +
+variables below, and enable the workflows.
 
-The AI review bot is model-agnostic: set the `AI_REVIEW_MODEL` repo variable to
-any model the pinned `pi-coding-agent` registry exposes (Anthropic, OpenAI, or
-Gemini) and provide the matching API-key secret. Default is
-`anthropic/claude-opus-4-8`. Tune reasoning effort with the `AI_REVIEW_THINKING`
-repo variable (`off | minimal | low | medium | high | xhigh`; empty = provider
-default) — don't bake a `:level` into `AI_REVIEW_MODEL` yourself.
+## Workflow secrets & variables
+
+Configure these on the target repo (**Settings → Secrets and variables →
+Actions**). The only thing required to run is **one** AI-provider key matching
+your model — everything else has a working default.
+
+### Secrets
+
+| Secret | Required? | Used by | Purpose |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | one provider key required | `bot-ai-review` | Auth for `anthropic/*` models (the default) |
+| `OPENAI_API_KEY` | alternative | `bot-ai-review` | Auth for `openai/*` models |
+| `GEMINI_API_KEY` | alternative | `bot-ai-review` | Auth for `google/*` models |
+| `GITHUB_TOKEN` | auto | all bots | Provided by GitHub Actions — **no setup** |
+| `MERGE_APP_PRIVATE_KEY` | optional | `bot-merge-policy` | GitHub App private key so a gate-merge push triggers `on: push` CD. Unset → falls back to `GITHUB_TOKEN` (CD won't fire). Scoped to the `development` environment, not repo-level. |
+
+Set only the provider key that matches `AI_REVIEW_MODEL`. All three are wired
+into the review step, but only the matching one is read.
+
+### Repo variables
+
+| Variable | Default | Used by | Purpose |
+|---|---|---|---|
+| `AI_REVIEW_MODEL` | `anthropic/claude-opus-4-8` | `bot-ai-review` | Reviewer model as `provider/id`; any model the pinned `pi-coding-agent` registry exposes (Anthropic / OpenAI / Gemini). |
+| `AI_REVIEW_THINKING` | _(empty)_ | `bot-ai-review` | Reasoning effort: `off \| minimal \| low \| medium \| high \| xhigh`. Empty = provider default. Don't bake a `:level` into `AI_REVIEW_MODEL` yourself. |
+| `AUTOASSIGN_ENABLED` | `false` (off) | `bot-auto-assign-pr` | Set to `true` to turn on reviewer auto-assignment. |
+| `AUTOASSIGN_POOL` | `[]` | `bot-auto-assign-pr` | JSON array of `{ login, pausedUntil?, reason? }` — the reviewer pool with OOO awareness. |
+| `AUTOMERGE_BASES` | `develop` | `bot-merge-policy` | Comma-separated base branches eligible for auto-merge. |
+| `MERGE_APP_ID` | _(empty)_ | `bot-merge-policy` | GitHub App id paired with `MERGE_APP_PRIVATE_KEY`. Empty → app-merge disabled (uses `GITHUB_TOKEN`). |
+
+Fastest path to a working AI-review gate:
+
+```bash
+gh secret set ANTHROPIC_API_KEY --body "sk-ant-..."
+```
 
 ## CLI
 
