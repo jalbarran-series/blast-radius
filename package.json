@@ -45,15 +45,28 @@
     "build": "node scripts/build-engine.mjs",
     "build:skills": "node scripts/build-skills.mjs",
     "prepack": "node scripts/build-engine.mjs",
+    "prepare": "husky",
     "setup": "node cli/bin/cli.js install",
-    "doctor": "node cli/bin/cli.js doctor"
+    "doctor": "node cli/bin/cli.js doctor",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "release": "commit-and-tag-version"
   },
   "dependencies": {
     "minimatch": "9.0.5",
     "yaml": "2.5.1"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.1.0",
+    "@commitlint/config-conventional": "21.1.0",
+    "commit-and-tag-version": "12.7.3",
     "esbuild": "0.24.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.0.8",
+    "oxfmt": "0.56.0",
+    "oxlint": "1.71.0",
     "tsx": "4.19.2",
     "vitest": "2.1.8"
   }

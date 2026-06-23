@@ -1,0 +1,11 @@
+{
+  "bumpFiles": [
+    { "filename": "package.json", "type": "json" },
+    { "filename": "package-lock.json", "type": "json" },
+    { "filename": ".claude-plugin/plugin.json", "type": "json" },
+    {
+      "filename": ".claude-plugin/marketplace.json",
+      "updater": "scripts/bump-marketplace-version.cjs"
+    }
+  ]
+}
